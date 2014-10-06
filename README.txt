@@ -8,7 +8,7 @@
   + mergesort.c
   + psum_test.c
   + quicksort.c
-  + threadpool.c
+  + threadpool.c = 2 structs and 5 functions to implement
   + threadpool.h
   + threadpool_lib.c
   + threadpool_lib.h
@@ -23,5 +23,7 @@ To view our 100+ commit messages please follow the following instructions:
 2. Login with the following credientials that have been created for you:
    USERNAME = TA3214
    PASSWORD = ilovecomputersystems
-3. After you login you will see under your repositories "quinnliu/threadPool". Click on that blue link.
-4. Near the top you will see "100+ commits". If you click on that you will see our commit log.
+3. After you login you will see under your repositories "quinnliu/threadPool". 
+   Click on that blue link.
+4. Near the top you will see "100+ commits". If you click on that you will see 
+   our commit log.
