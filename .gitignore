@@ -19,3 +19,9 @@
 
 # compiled executables
 src/esh
+
+# Specific files to ignore for thread pool project
+fib_test
+mergesort
+psum_test
+quicksort
