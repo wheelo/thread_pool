@@ -1,3 +1,8 @@
+#ifndef THREADPOOL_H // if unique value THREADPOOL_H is NOT defined
+#define THREADPOOL_H //   define(add) THREADPOOL_H code into file
+
+#include "list.h"
+
 /**
  * threadpool.h
  *
@@ -59,3 +64,4 @@ void * future_get(struct future *);
 /* Deallocate this future.  Must be called after future_get() */
 void future_free(struct future *);
 
+#endif
