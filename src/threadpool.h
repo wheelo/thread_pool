@@ -1,6 +1,9 @@
 #ifndef THREADPOOL_H // if unique value THREADPOOL_H is NOT defined
 #define THREADPOOL_H //   define(add) THREADPOOL_H code into file
 
+#include <stdio.h> // printf()
+#include <stdlib.h> // malloc()
+#include <pthread.h> // pthread_create()
 #include "list.h"
 
 /**
