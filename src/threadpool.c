@@ -109,6 +109,7 @@ struct future * thread_pool_submit(struct thread_pool *threadPool,
 
 /**
  * Get result of computation.
+ * Leapfrogging Paper = http://cseweb.ucsd.edu/~calder/papers/PPoPP-93.pdf
  */
 void * future_get(struct future *futureStruct) {
     // How do you find future? iterate through list of GSQueue and worker thread deques?
