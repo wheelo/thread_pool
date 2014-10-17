@@ -6,21 +6,39 @@ struct single_thread {
 
 	// http://stackoverflow.com/questions/6420090/pthread-concepts-in-linux
 	pthread_t* thread; 
+
+	// local deque of futures
 };
 
 struct thread_pool {
 	struct list listOfThreads;
+	struct list GSQueue; 	// global submission queue
 };
+
+/*
+enum futureState {
+  notStated
+  inProgress
+  completed
+}
+*/   
 
 /**
  * From 2.4 Basic Strategy
  * Should store a pointer to the function to be called, any data to be passed
  * to that function, as well as the result(when available).
  */
-struct future { // = ???
-	// define appropriate variables to record the state of a future
-	// started, in progress, has completed
-	// which 
+struct future { 
+	int indexWithinLocalDeque; // call list_size()
+	bool inGSQueue;
+
+	// enum futureState
+
+	// any data to be passed to below function pointer
+	// fork_join_task_t? = pointer to the function to be called
+
+	void* result;
+	int depth; // 
 };
 
 static void * functionToBeExecutedByEachThreadInParrallel(void *arg) {
@@ -70,7 +88,19 @@ struct future * thread_pool_submit(struct thread_pool *threadPool,
 	return NULL;
 }
 
+/**
+ * Get result of computation.
+ */
 void * future_get(struct future *futureStruct) {
+	// How do you find future? iterate through list of GSQueue and worker thread deques?
+
+    /*
+    if future has completed
+      return result
+    else 
+      a unbusy worker thread can steal it and execute it itself
+    */ 
+
 	return NULL;
 }
 
