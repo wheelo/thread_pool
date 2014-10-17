@@ -1,2 +1,27 @@
-#<AutoIgnore>
-#<AutoIgnore/>
+# Object files
+*.o
+*.ko
+
+# Libraries
+*.lib
+*.a
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# compiled executables
+src/esh
+
+# Specific files to ignore for thread pool project
+fib_test
+mergesort
+psum_test
+quicksort
