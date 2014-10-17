@@ -19,13 +19,13 @@ struct thread_pool {
 	bool isShuttingDown;
 };
 
-/*
-enum futureState {
-  notStated
-  inProgress
-  completed
-}
-*/   
+
+typedef enum future_status_ {
+  NOT_STARTED,
+  IN_PROGRESS, /* executing */
+  COMPLETED
+} future_status;
+
 
 /**
  * From 2.4 Basic Strategy
@@ -37,7 +37,7 @@ struct future {
 	int indexWithinLocalDeque; // call list_size()
 	bool inGSQueue;
 
-    // enum futureState
+    future_status status;
 
 	// any data to be passed to below function pointer
     void* data;
