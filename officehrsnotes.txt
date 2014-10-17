@@ -1,0 +1,26 @@
+
+global list of futures
+only create threads in thread_pool_new
+
+future {
+    void *data
+    // L index, R index
+}
+
+don't need lock for creating threadpool
+
+point of having separate lists - don't want to contend with the same lock
+    - might as well have the same list if that
+
+all lists need locks
+
+2 sep loops so that don't try to steal from uninitialized list
+
+initialize locks? then spawn all them
+
+when to join: flag for shutdown true
+    - don't just
+
+threads: check is there work to do? 
+
+LEAP FROGGING PAPER
