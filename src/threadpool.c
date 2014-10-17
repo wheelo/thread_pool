@@ -20,11 +20,11 @@ struct thread_pool {
 };
 
 
-typedef enum future_status_ {
+typedef enum futureStatus_ {
   NOT_STARTED,
   IN_PROGRESS, /* executing */
   COMPLETED
-} future_status;
+} futureStatus;
 
 
 /**
@@ -37,7 +37,7 @@ struct future {
 	int indexWithinLocalDeque; // call list_size()
 	bool inGSQueue;
 
-    future_status status;
+    futureStatus status;
 
 	// any data to be passed to below function pointer
     void* data;
