@@ -19,7 +19,7 @@ struct thread_pool {
 typedef enum future_status_ {
   NOT_STARTED,
   IN_PROGRESS, /* executing */
-  COMPLETED
+  COMPLETED;
 } future_status;
 
 
