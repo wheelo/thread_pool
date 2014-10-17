@@ -52,7 +52,7 @@ static void * functionToBeExecutedByEachThreadInParrallel(void *arg) {
     return NULL;
 }
 
-void printError(char* errorMessage) {
+static void printError(char* errorMessage) {
 	write(2, errorMessage, strlen(errorMessage));
 }
 
