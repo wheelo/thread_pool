@@ -4,6 +4,8 @@
 #include <stdio.h> // printf()
 #include <stdlib.h> // malloc()
 #include <pthread.h> // pthread_create()
+#include <unistd.h> // write()
+#include <string.h> // strlen()
 #include "list.h"
 
 /**
