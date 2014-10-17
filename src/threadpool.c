@@ -34,11 +34,12 @@ struct future {
 
     // enum futureState
 
-    // any data to be passed to below function pointer
+    // any data to be passed to below function pointer 
+    void *data;
     // fork_join_task_t? = pointer to the function to be called
 
     void* result;
-    int depth; // 
+    int depth; // see the leap frogging paper
 };
 
 static void * functionToBeExecutedByEachThreadInParrallel(void *arg) {
