@@ -5,7 +5,7 @@ struct single_thread {
 						   // generic coded in list.c & list.h
 
 	// http://stackoverflow.com/questions/6420090/pthread-concepts-in-linux
-	pthread_t* thread; 
+	pthread_t* thread;
 };
 
 struct thread_pool {
@@ -20,7 +20,7 @@ struct thread_pool {
 struct future { // = ???
 	// define appropriate variables to record the state of a future
 	// started, in progress, has completed
-	// which 
+	// which
 };
 
 static void * functionToBeExecutedByEachThreadInParrallel(void *arg) {
@@ -38,23 +38,23 @@ struct thread_pool * thread_pool_new(int nthreads) {
 	}
 
 	// http://stackoverflow.com/questions/1963780/when-should-i-use-malloc-in-c-and-when-dont-i
-	struct thread_pool* threadPool = (struct thread_pool*) 
+	struct thread_pool* threadPool = (struct thread_pool*)
 								malloc(sizeof(struct thread_pool));
 	list_init(&threadPool->listOfThreads);
 
 	struct list_elem* e;
 	struct list* threads = &threadPool->listOfThreads;
 	for(e = list_begin(threads); e != list_end(threads); e = list_next(e)) {
-		struct single_thread* currentThread = list_entry(e, 
+		struct single_thread* currentThread = list_entry(e,
 												struct single_thread, dlln);
 		// http://stackoverflow.com/questions/6990888/c-how-to-create-thread-using-pthread-create-function
-		if (pthread_create(currentThread->thread, NULL, 
+		if (pthread_create(currentThread->thread, NULL,
 			functionToBeExecutedByEachThreadInParrallel, NULL) == -1) {
-			printf("In thread_pool_new() error creating pthread\n"); 
+			printf("In thread_pool_new() error creating pthread\n");
     		exit(-1);
 		}
 	}
-	
+
 	return threadPool;
 }
 
@@ -65,7 +65,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *threadPool) {
 
 }
 
-struct future * thread_pool_submit(struct thread_pool *threadPool, 
+struct future * thread_pool_submit(struct thread_pool *threadPool,
 	                               fork_join_task_t task, void * data) {
 	return NULL;
 }
