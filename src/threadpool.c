@@ -1,7 +1,6 @@
 #include "threadpool.h"
 
 struct single_thread {
-<<<<<<< HEAD
 	struct list_elem elem; // doubly linked list node to be able to add to
 						   // generic coded in list.c & list.h
 
@@ -18,20 +17,6 @@ struct thread_pool {
 	struct list/*<pthread_t>*/ listOfThreads;
 	struct list/*<Future>*/ GSQueue; // global submission queue
 	bool isShuttingDown;
-=======
-    struct list_elem dlln; // doubly linked list node to be able to add to
-                           // generic coded in list.c & list.h
-
-    // http://stackoverflow.com/questions/6420090/pthread-concepts-in-linux
-    pthread_t* thread; 
-
-    // local deque of futures
-};
-
-struct thread_pool {
-    struct list listOfThreads;
-    struct list GSQueue;    // global submission queue
->>>>>>> a4ff2a568fdd03adb23b3de086b01373bb1cd257
 };
 
 /*
