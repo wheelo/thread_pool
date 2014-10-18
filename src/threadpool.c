@@ -161,13 +161,14 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
     // p_future->semaphore???
+    // p_future->condition_variable
 
     if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
         print_error("pthread_mutex_lock() error\n");
         exit(EXIT_FAILURE);
     }
 	// future pointer gets added to gs_queue
-    list_push_back(&gs_queue, &p_future->elem);
+    list_push_back(&pool->gs_queue, &p_future->elem);
 
     if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
         print_error("pthread_mutex_unlock() error\n");
