@@ -1,8 +1,6 @@
 #include "threadpool.h"
 
-
-// #include <stdlib.h>   // may needed for EXIT_FAILURE?
-
+static void * thread_function(void *arg);
 
 struct worker_thread {
 	struct list_elem elem; // doubly linked list node to be able to add to
@@ -14,19 +12,18 @@ struct worker_thread {
 
 	// local deque of futures
 	struct list/*<Future>*/ local_deque;
+    bool currently_has_internal_submission; // if false: external submission
 };
 
 struct thread_pool {
-	struct list/*<worker_thread>*/ threads_list; // TODO: make array?
+	struct list/*<worker_thread>*/ threads_list; 
 
 	struct list/*<Future>*/ gs_queue; /* global submission queue */
 	bool is_shutting_down;
 
     pthread_mutex_t gs_queue_lock;  /* mutex lock for global submission queue */
     // TODO: semaphore or condition variable
-
 };
-
 
 typedef enum future_status_ {
   NOT_STARTED,
@@ -34,14 +31,13 @@ typedef enum future_status_ {
   COMPLETED
 } future_status;
 
-
 /**
  * From 2.4 Basic Strategy
  * Should store a pointer to the function to be called, any data to be passed
  * to that function, as well as the result(when available).
  */
 struct future {
-    void* param_for_thread_fp;
+    void* param_for_thread_fp; 
     // Note: fork_join_task_t defn
     // void * (* fork_join_task_t) (struct thread_pool *pool, void *data);
     fork_join_task_t thread_fp;   /* pointer to the function to be called */
@@ -63,16 +59,7 @@ struct future {
     bool future_get_called;     // don't call future_free() if false
 
     struct list_elem elem;     // necessary to add to struct list gs_queue
-
 };
-
-
-static void * thread_function(void *arg)
-{
-    // what code to execute and how do we get it here???
-    return NULL;
-}
-
 
 /**
  * @param nthreads = number of threads to create
@@ -83,8 +70,6 @@ struct thread_pool * thread_pool_new(int nthreads)
 		print_error("You must create at least 1 thread\n");
 		return NULL;
 	}
-
-
 
 	// http://stackoverflow.com/questions/1963780/when-should-i-use-malloc-in-c-and-when-dont-i
 	struct thread_pool* pool = (struct thread_pool*)
@@ -167,6 +152,11 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     // check data?
 
     /* Create a new future */
+    struct future *p_future = (struct future*) malloc(sizeof(struct future));
+    &p_future->param_for_thread_fp = data;
+    &p_future->thread_fp = task;
+    &p_future->result = NULL;
+    &p_future->status = NOT_STARTED;
 
 	// initialize fields in Future struct
 
@@ -207,4 +197,10 @@ void future_free(struct future *f)
     }
 
     // ...
+}
+
+static void * thread_function(void *arg)
+{
+    // what code to execute and how do we get it here???
+    return NULL;
 }
