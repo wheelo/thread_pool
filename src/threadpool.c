@@ -46,6 +46,9 @@ struct future {
 	
     future_status status;   // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
+    /* ADD SEMAPHORE !? */
+
+
 	
     // FOR LEAPFROGGING 
     // int idx_in_local_deque;    // call list_size()
@@ -56,7 +59,7 @@ struct future {
     // ?? piazza __thread bool is_internal_submission; // if false: external submission
     /* bool is_internal_submission; // if false: external submission */
 
-    bool future_get_called;     // don't call future_free() if false
+    // bool future_get_called;     // don't call future_free() if false
 
     struct list_elem elem;     // necessary to add to struct list gs_queue
 };
