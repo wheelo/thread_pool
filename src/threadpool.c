@@ -19,9 +19,7 @@ struct worker_thread {
 };
 
 struct thread_pool {
-	struct list/*<pthread_t>*/ threads_list; // TODO: make array?
-    //pthread_t *worker_threads; /* don't know size of array yet (# threads), so
-                                 // just declare ptr to start of array */
+	struct list/*<worker_thread>*/ threads_list; // TODO: make array?
 
 	struct list/*<Future>*/ gs_queue; /* global submission queue */
 	bool is_shutting_down;
@@ -92,41 +90,45 @@ struct thread_pool * thread_pool_new(int nthreads)
     int rval;  /* return value */
     rval = pthread_mutex_init(&pool->gs_queue_lock, NULL); // attr = NULL (default attributes)
     // returns 0 if successful, error code if not. TODO pass err_code to print_error
-    if (rval != 0) { 
-        print_error("pthread_mutex_init(&gs_queue_lock, NULL)\n"); 
+    if (rval != 0) {
+        print_error("pthread_mutex_init(&gs_queue_lock, NULL)\n");
     }
 
-    /* allocate space for nthreads */
-    //pool->worker_threads = (pthread_t *) malloc(sizeof pthread_t * nthreads);      // TODO make sure to free
-    //if (pool->worker_threads == NULL) {
-    //    print_error("malloc error\n");
-    //}
 
-    /* if using array doesn't work, here's linked list of worker threads */
-    pool->threads_list = (pthread_t *)malloc(sizeof pthread_t * nthreads);
-    if (pool->threads_list == NULL) { 
-        print_error("malloc() error\n"); 
-    }
-    
-	
-    list_init(&pool->threads_list);
-	list_init(&pool->gs_queue);
-    
-	struct list_elem* e;
-	for (e = list_begin(&pool->threads_list); e != list_end(&pool->threads_list);
-         e = list_next(e)) {
+        list_init(&pool->threads_list);
+		list_init(&pool->gs_queue);
+
+		int i;
+		for (i = 0; i < nthreads; ++i) {
+		    // malloc worker thread
+			struct worker_thread *p_thread_i = (struct worker_thread *) malloc(sizeof(struct worker_thread));
+
+			// malloc its thread
+			pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t));
+
+            p_thread_i->thread = ptr_thread;
+
+            // Q: why not malloc list_elem? 
+
+
+			// malloc the worker thread's local deque of futures
+            list_push_back(&pool->threads_list, &pool->elem);
+		}
+
+		struct list_elem* e;
+		for (e = list_begin(&pool->threads_list); e != list_end(&pool->threads_list);
+             e = list_next(e)) {
 
         struct worker_thread* current_thread = list_entry(e, struct worker_thread, elem);
         /* note: unlike process functions this and other pthread_ and sem_ functions
                  can return error codes other than  -1, and return 0 if successful, so check if != 0 */
-		
-        if ( pthread_create(current_thread->thread, NULL, thread_function, NULL) != 0) {
-		  	print_error("In thread_pool_new() error creating pthread\n");
-    		exit(-1);
-		}
-        
-	}
 
+        if ( pthread_create(current_thread->thread, NULL, thread_function, NULL) != 0) {
+		  		print_error("In thread_pool_new() error creating pthread\n");
+    			exit(-1);
+		}
+
+	}
 
 	return pool;
 }
