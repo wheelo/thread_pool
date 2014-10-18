@@ -42,7 +42,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *);
  *
  * Returns the result of its computation.
  */
-typedef void * (* fork_join_task_t) (struct thread_pool *pool, void * data);
+typedef void * (* fork_join_task_t) (struct thread_pool *pool, void *data);
 
 /* 
  * Submit a fork join task to the thread pool and return a
@@ -54,19 +54,18 @@ typedef void * (* fork_join_task_t) (struct thread_pool *pool, void * data);
  *
  * Returns a future representing this computation.
  */
-struct future * thread_pool_submit(
-        struct thread_pool *pool, 
-        fork_join_task_t task, 
-        void * data);
+struct future * thread_pool_submit(struct thread_pool *pool, 
+                                   fork_join_task_t task, 
+                                   void * data);
 
 /* Make sure that the thread pool has completed the execution
  * of the fork join task this future represents.
  *
  * Returns the value returned by this task.
  */
-void * future_get(struct future *);
+void * future_get(struct future *f);
 
 /* Deallocate this future.  Must be called after future_get() */
-void future_free(struct future *);
+void future_free(struct future *f);
 
 #endif

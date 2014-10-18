@@ -43,3 +43,8 @@ count_number_of_threads(void)
     printf("Internal error, please send email to gback@cs.vt.edu\n");
     abort();
 }
+
+void print_error(char* err_msg) 
+{
+    write(ERR, err_msg, strlen(err_msg));
+}
