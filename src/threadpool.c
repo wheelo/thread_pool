@@ -150,16 +150,15 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
     // check data?
 
-    /* Create a new future */
+    /* Initialize Future struct */
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
-    &p_future->param_for_thread_fp = data;
-    &p_future->thread_fp = task;
-    &p_future->result = NULL;
-    &p_future->status = NOT_STARTED;
-
-	// initialize fields in Future struct
+    p_future->param_for_thread_fp = data;
+    p_future->thread_fp = task;
+    p_future->result = NULL;
+    p_future->status = NOT_STARTED;
 
 	// future pointer gets added to gs_queue
+    list_push_back(&gs_queue, &p_future->elem);
 
 	return NULL;
 }
