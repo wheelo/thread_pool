@@ -58,8 +58,7 @@ struct future {
 };
 
 
-//static --> can it be static? we should discuss what this one does/ ask a TA
-void * thread_function(void *arg)
+static void * thread_function(void *arg)
 {
     // what code to execute and how do we get it here???
     return NULL;
