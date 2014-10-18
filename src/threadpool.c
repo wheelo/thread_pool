@@ -53,13 +53,13 @@ struct future {
 	
     // FOR LEAPFROGGING 
     // int idx_in_local_deque;    // call list_size()
-	int depth; // see the leap frogging paper
+	// int depth; // see the leap frogging paper
 
-    bool in_gs_queue;
+    /* prob not necessary: bool in_gs_queue; */
 
     __thread bool internal_submission; // if false: external submission
 
-    bool future_get_called; // don't call future_free() if false
+    bool future_get_called;     // don't call future_free() if false
 
     struct list_elem elem;     // necessary to add to struct list gs_queue
 
