@@ -1,3 +1,4 @@
+/* list.h */
 #ifndef __LIST_H
 #define __LIST_H
 /* This code is taken from the Pintos education OS.
@@ -34,8 +35,7 @@
       
       // Front-to-back iteration
       struct list_elem *e;
-      for (e = list_begin(&foo_list); e != list_end(&foo_list);
-           e = list_next(e)) {
+      for (e = list_begin(&foo_list); e != list_end(&foo_list); e = list_next(e)) {
           
           struct foo *f = list_entry(e, struct foo, elem);
           //...do something with f...
@@ -43,7 +43,7 @@
 
       // Back-to-front iteration
       struct list_elem *e;
-      for (e = list_regin(&foo_list); e != list_rend(); e = list_prev() ) {
+      for (e = list_rbegin(&foo_list); e != list_rend(&foo_list); e = list_prev(e)) {
           struct foo *f = list_entry(e, struct foo, elem);
           //...do something with f...
       }
@@ -145,7 +145,7 @@ void list_push_back(struct list *,
                     struct list_elem *);
 
 /* List removal. */
-struct list_elem *list_remove(struct list_elem *);
+struct list_elem *list_remove(struct list_elem *);  // see warning in list.c
 struct list_elem *list_pop_front(struct list *);
 struct list_elem *list_pop_back(struct list *);
 
@@ -161,8 +161,9 @@ bool list_empty(struct list *);
 void list_reverse(struct list *);
 
 /* Compares the value of two list elements A and B, given
-   auxiliary data AUX.  Returns true if A is less than B, or
-   false if A is greater than or equal to B. */
+   auxiliary data AUX.  
+   Returns true if A is less than B, or
+           false if A is greater than or equal to B. */
 typedef bool list_less_func(const struct list_elem *a,
                             const struct list_elem *b,
                             void *aux);
@@ -176,9 +177,9 @@ void list_insert_ordered(struct list *,
                          list_less_func *,
                          void *aux);
 void list_unique(struct list *, 
-                  struct list *duplicates,
-                  list_less_func *, 
-                  void *aux);
+                 struct list *duplicates,
+                 list_less_func *, 
+                 void *aux);
 
 /* Max and min. */
 struct list_elem *list_max(struct list *, list_less_func *, void *aux);

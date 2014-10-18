@@ -31,10 +31,33 @@
    elements allows us to do a little bit of checking on some
    operations, which can be valuable.) */
 
-static bool is_sorted(struct list_elem *a,
-                      struct list_elem *b,
-                      list_less_func *less,
-                      void *aux);
+
+
+
+/* ITERATION SNIPPETS:
+   As long as list_elem members are called elem, can copy and paste:
+
+    // Front-to-back iteration
+    struct list_elem *e;
+    for (e = list_begin(&foo_list); e != list_end(&foo_list); e = list_next(e)) {          
+        // Get list element pointer & do something with it
+        struct foo *f = list_entry(e, struct foo, elem);
+    }
+
+    // Back-to-front iteration
+    struct list_elem *e;
+    for (e = list_rbegin(&foo_list); e != list_rend(&foo_list); e = list_prev(e)) {
+        struct foo *f = list_entry(e, struct foo, elem);
+        //...do something with f...
+    }
+ */
+ 
+
+static bool 
+is_sorted(struct list_elem *a,
+          struct list_elem *b,
+          list_less_func *less,
+          void *aux);
 
 /* Returns true if ELEM is a head, false otherwise. */
 static inline bool
@@ -82,7 +105,7 @@ list_begin(struct list *list)
 struct list_elem *
 list_next(struct list_elem *elem)
 {
-    assert( is_head(elem) || is_interior(elem) );
+    assert(is_head(elem) || is_interior(elem));
     return elem->next;
 }
 
@@ -248,7 +271,6 @@ void list_push_back(struct list *list, struct list_elem *elem)
        ...do something with e...
    }
 */
-
 struct list_elem *
 list_remove(struct list_elem *elem)
 {
@@ -332,7 +354,6 @@ list_reverse(struct list *list)
 {
     if (!list_empty(list)) {
         struct list_elem *e;
-
         for (e = list_begin(list); e != list_end(list); e = e->prev) {
             swap(&e->prev, &e->next);
         }
@@ -479,8 +500,10 @@ list_insert_ordered(struct list *list,
    given auxiliary data AUX.  If DUPLICATES is non-null, then the
    elements from LIST are appended to DUPLICATES. */
 void
-list_unique(struct list *list, struct list *duplicates,
-             list_less_func *less, void *aux)
+list_unique(struct list *list, 
+            struct list *duplicates,
+            list_less_func *less, 
+            void *aux)
 {
     struct list_elem *elem, *next;
 
@@ -534,7 +557,6 @@ list_min(struct list *list, list_less_func *less, void *aux)
     struct list_elem *min = list_begin(list);
     if (min != list_end(list)) {
        struct list_elem *e;
-
         for (e = list_next(min); e != list_end(list); e = list_next(e)) {
             if (less(e, min, aux)) {
                 min = e;
@@ -542,15 +564,4 @@ list_min(struct list *list, list_less_func *less, void *aux)
         }
     }
     return min;
-}
-
-struct list_elem * list_elem_at(struct list * list, int x);
-struct list_elem * list_elem_at(struct list * list, int x) {
-
-	struct list_elem * e = &list->head;
-	int y;
-	for (y = 0; y == x; y++) {
-		e = list_next(e);
-	}
-	return e;
 }
