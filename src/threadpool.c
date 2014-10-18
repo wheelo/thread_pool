@@ -37,20 +37,27 @@ typedef enum future_status_ {
  * to that function, as well as the result(when available).
  */
 struct future {
-	struct list_elem elem;     // necessary to add to struct list gs_queue
-	int idx_in_local_deque;    // call list_size()
-	bool in_gs_queue;
-
-    future_status status;
-
-	// any data to be passed to below function pointer
-    void* data;
+    void* param_for_thread_fp; 
     // Note: fork_join_task_t defn
     // void * (* fork_join_task_t) (struct thread_pool *pool, void *data);
-	fork_join_task_t thread_fp;   /* pointer to the function to be called */
+    fork_join_task_t thread_fp;   /* pointer to the function to be called */
 
     void* result;
-    int depth; // see the leap frogging paper
+	
+    future_status status;   // NOT_STARTED, IN_PROGRESS, or COMPLETED
+
+	
+    // FOR LEAPFROGGING 
+    // int idx_in_local_deque;    // call list_size()
+	// int depth; // see the leap frogging paper
+
+    /* prob not necessary: bool in_gs_queue; */
+
+    __thread bool internal_submission; // if false: external submission
+
+    bool future_get_called;     // don't call future_free() if false
+
+    struct list_elem elem;     // necessary to add to struct list gs_queue
 };
 
 /**
