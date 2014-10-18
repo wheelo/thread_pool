@@ -111,7 +111,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 
 			// malloc the worker thread's local deque of futures
-            list_push_back(&pool->threads_list, &pool->elem);
+            list_push_back(&pool->threads_list, &p_thread_i->elem);
 		}
 
 		struct list_elem* e;
