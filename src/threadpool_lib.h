@@ -1,4 +1,7 @@
 #include <time.h>
+#include <unistd.h> // write()
+#include <string.h> // strlen()
+
 
 struct timespec timespec_diff(struct timespec start, struct timespec end);
 void timespec_print(struct timespec ts, char *buf, size_t buflen);
