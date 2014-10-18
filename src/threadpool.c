@@ -1,6 +1,5 @@
 #include "threadpool.h"
 
-#include "threadpool_lib.h"  /* print_error() */
 
 // #include <stdlib.h>   // may needed for EXIT_FAILURE?
 
@@ -84,50 +83,50 @@ struct thread_pool * thread_pool_new(int nthreads)
 		print_error("malloc() error\n");
 	}
 
-    // TODO: at some point (not nec. right here) init semaphore w/ value nthreads,
+
+    // TODO: 
+    // at some point (not nec. right here) init semaphore w/ value nthreads,
     //       or condition var(s)
-    int rval;  /* return value */
-    rval = pthread_mutex_init(&pool->gs_queue_lock, NULL); // attr = NULL (default attributes)
-    // returns 0 if successful, error code if not. TODO pass err_code to print_error
-    if (rval != 0) {
+    
+
+    if ( pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0 ) {
         print_error("pthread_mutex_init(&gs_queue_lock, NULL)\n");
     }
 
+    pool->is_shutting_down = false;
+    list_init(&pool->threads_list);
+	list_init(&pool->gs_queue);
 
-        list_init(&pool->threads_list);
-		list_init(&pool->gs_queue);
+	int i;
+	for (i = 0; i < nthreads; ++i) {
+	    // malloc worker thread
+		struct worker_thread *p_thread_i = (struct worker_thread *) malloc(sizeof(struct worker_thread));
 
-		int i;
-		for (i = 0; i < nthreads; ++i) {
-		    // malloc worker thread
-			struct worker_thread *p_thread_i = (struct worker_thread *) malloc(sizeof(struct worker_thread));
+		// malloc its thread
+		pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t));
 
-			// malloc its thread
-			pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t));
+        p_thread_i->thread = ptr_thread;
 
-            p_thread_i->thread = ptr_thread;
-
-            // Q: why not malloc list_elem? 
+        // Q: why not malloc list_elem? 
 
 
-			// malloc the worker thread's local deque of futures
-            list_push_back(&pool->threads_list, &p_thread_i->elem);
-		}
+		// malloc the worker thread's local deque of futures
+        list_push_back(&pool->threads_list, &p_thread_i->elem);
+	}
 
-		struct list_elem* e;
-		for (e = list_begin(&pool->threads_list); e != list_end(&pool->threads_list);
-             e = list_next(e)) {
+	struct list_elem* e;
+	for (e = list_begin(&pool->threads_list); e != list_end(&pool->threads_list);
+         e = list_next(e)) {
 
         struct worker_thread* current_thread = list_entry(e, struct worker_thread, elem);
         /* note: unlike process functions this and other pthread_ and sem_ functions
-                 can return error codes other than  -1, and return 0 if successful, so check if != 0 */
+             can return error codes other than  -1, and return 0 if successful, so check if != 0 */
 
         if ( pthread_create(current_thread->thread, NULL, thread_function, NULL) != 0) {
-		  		print_error("In thread_pool_new() error creating pthread\n");
-    			exit(-1);
-		}
-
-	}
+	  		print_error("In thread_pool_new() error creating pthread\n");
+			exit(EXIT_FAILURE);
+	    }
+    }
 
 	return pool;
 }
@@ -145,6 +144,19 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                                    fork_join_task_t task,
                                    void * data)
 {
+    if (pool == NULL) {
+        print_error("thread_pool_submit: pool arg is NULL");
+        exit(EXIT_FAILURE);
+    }
+
+    if (task == NULL) {
+        print_error("thread_pool_submit: pool arg is NULL");
+        exit(EXIT_FAILURE);
+    }
+
+    // check data?
+
+    /* Create a new future */
 
 	// initialize fields in Future struct
 

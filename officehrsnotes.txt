@@ -29,3 +29,24 @@ LEAP FROGGING PAPER
 THREAD-LOCAL STORAGE (TLS)
 Threads belonging to a process share the data of the process. Indeed, this data sharing provides one of the benefits of multithreaded programming. However, in some circumstances, each thread might need its own copy of certain data. We will call such data thread-local storage (or TLS.) For example, in a transaction-processing system, we might service each transaction in a separate thread. Furthermore, each transaction might be assigned a unique identifier. To associate each thread with its unique identifier, we could use thread-local storage.
 It is easy to confuse TLS with local variables. However, local variables are visible only during a single function invocation, whereas TLS data are visible across function invocations. In some ways, TLS is similar to static data. The difference is that TLS data are unique to each thread. Most thread libraries—including Windows and Pthreads—provide some form of support for thread-local storage; Java provides support as well.
+
+
+5.6.1 Semaphore Usage
+binary sem: mutex lock basically
+counting sem: 
+    Counting semaphores can be used to control access to a given resource consisting of a finite number of instances. 
+        **** The semaphore is initialized to the number of resources available ****
+        Each process that wishes to use a resource performs a wait() operation on the semaphore (thereby decrementing the count). When a process releases a resource, it performs a signal() operation (incrementing the count). When the count for the semaphore goes to 0, all resources are being used. After that, processes that wish to use a resource will block until the count becomes greater than 0.
+
+
+
+
+
+Q::
+ThreadB has queue_lock. ThreadB (without unlocking queue) calls cond_signal or _broadcast.
+    - This wakes up ThreadA which was sleeping. Does ThreadA
+    nec. own the queue mutex lock when it is awoken?
+
+ThreadB has queue_lock. ThreadB (FIRST UNLOCKING queue) calls cond_signal or _broadcast.
+    - This wakes up ThreadA which was sleeping. Does ThreadA
+    nec. own the queue mutex lock when it is awoken?
