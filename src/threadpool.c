@@ -10,7 +10,6 @@ struct worker_thread {
 
 	// http://stackoverflow.com/questions/6420090/pthread-concepts-in-linux
 	pthread_t* thread;
-	bool internal_submission; // if false: external submission
 	// TODO: use thread local storage 2.4 in spec
 
 	// local deque of futures
@@ -48,8 +47,11 @@ struct future {
 
     future_status status;
 
+    __thread bool internal_submission; // if false: external submission
 	// any data to be passed to below function pointer
     void* data;
+    // Note: fork_join_task_t defn
+    // void * (* fork_join_task_t) (struct thread_pool *pool, void *data);
 	fork_join_task_t thread_fp;   /* pointer to the function to be called */
 
     void* result;
