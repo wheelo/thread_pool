@@ -19,9 +19,9 @@ struct worker_thread {
 };
 
 struct thread_pool {
-	//struct list/*<pthread_t>*/ threads_list; // TODO: make array?
-    pthread_t *worker_threads; /* don't know size of array yet (# threads), so
-                                  just declare ptr to start of array */
+	struct list/*<pthread_t>*/ threads_list; // TODO: make array?
+    //pthread_t *worker_threads; /* don't know size of array yet (# threads), so
+                                 // just declare ptr to start of array */
 
 	struct list/*<Future>*/ gs_queue; /* global submission queue */
 	bool is_shutting_down;
@@ -29,7 +29,6 @@ struct thread_pool {
     pthread_mutex_t gs_queue_lock;  /* mutex lock for global submission queue */
     // TODO: semaphore or condition variable
 
-    unsigned int num_threads; // prob not necessary, can always check size of threads_list
 };
 
 
@@ -98,35 +97,35 @@ struct thread_pool * thread_pool_new(int nthreads)
     }
 
     /* allocate space for nthreads */
-    pool->worker_threads = (pthread_t *) malloc(sizeof pthread_t * nthreads);      // TODO make sure to free
-    if (pool->worker_threads == NULL) {
-        print_error("malloc error\n");
-    }
+    //pool->worker_threads = (pthread_t *) malloc(sizeof pthread_t * nthreads);      // TODO make sure to free
+    //if (pool->worker_threads == NULL) {
+    //    print_error("malloc error\n");
+    //}
 
-    /* if using array doesn't work, here's linked list of worker threads
+    /* if using array doesn't work, here's linked list of worker threads */
     pool->threads_list = (pthread_t *)malloc(sizeof pthread_t * nthreads);
     if (pool->threads_list == NULL) { 
         print_error("malloc() error\n"); 
     }
-    */
+    
 	
-    //list_init(&pool->threads_list);
+    list_init(&pool->threads_list);
 	list_init(&pool->gs_queue);
-
+    
 	struct list_elem* e;
 	for (e = list_begin(&pool->threads_list); e != list_end(&pool->threads_list);
-        e = list_next(e)) {
+         e = list_next(e)) {
 
         struct worker_thread* current_thread = list_entry(e, struct worker_thread, elem);
         /* note: unlike process functions this and other pthread_ and sem_ functions
                  can return error codes other than  -1, and return 0 if successful, so check if != 0 */
-		if (pthread_create(current_thread->thread, NULL, thread_function, NULL) == -1) {
+		
+        if ( pthread_create(current_thread->thread, NULL, thread_function, NULL) != 0) {
 		  	print_error("In thread_pool_new() error creating pthread\n");
     		exit(-1);
 		}
+        
 	}
-
-
 
 
 	return pool;

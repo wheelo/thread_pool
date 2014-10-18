@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include "threadpool_lib.h"
 
+#define ERR     2
+
+
 // http://www.guyrutenberg.com/2007/09/22/profiling-code-using-clock_gettime/
 struct timespec timespec_diff(struct timespec start, struct timespec end)
 {
