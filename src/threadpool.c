@@ -49,10 +49,10 @@ struct worker {
  * to that function, as well as the result(when available).
  */
 struct future {
-    void* param_for_thread_fp; 
+    void* param_for_task_fp; 
     // Note: fork_join_task_t defn
     // void * (* fork_join_task_t) (struct thread_pool *pool, void *data);
-    fork_join_task_t thread_fp;   /* pointer to the function to be called */
+    fork_join_task_t task_fp;   /* pointer to the function to be called */
 
     void* result;
 	
@@ -161,8 +161,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
     /* Initialize Future struct */
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
-    p_future->param_for_thread_fp = data;
-    p_future->thread_fp = task;
+    p_future->param_for_task_fp = data;
+    p_future->task_fp = task;
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
 
