@@ -22,6 +22,9 @@ struct thread_pool {
     pthread_mutex_t gs_queue_lock;      /* lock for global queue */
     pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
 
+    // TODO: also may need additional cond - can_steal, or combine that with above (tasks_available_in_pool)
+    //       or may be good enough without 2nd if worker still tries to steal.
+
     // NOTE: renamed from thread_list to worker_list, since its a list of worker 
     // structs that have not just a thread member but deque, other stuff
 	struct list/*<worker>*/ worker_list;  // may be easier to use as an array
@@ -71,8 +74,8 @@ struct future {
 
     void* result;
 	
-    //future_status status;   // NOT_STARTED, IN_PROGRESS, or COMPLETED
-    bool is_done; 
+    future_status status;       // NOT_STARTED, IN_PROGRESS, or COMPLETED
+    //bool is_done; 
 
     bool is_internal_task;      // if thread_pool_submit() called by a worker thread
 
@@ -176,6 +179,10 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 {
+
+    // broadcast - wake up threads asleep
+
+
 	// call pthread_join() on threads to wait for them to finish and reap
 	// their resources
 	// DON'T use pthread_cancel()
@@ -188,15 +195,11 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                                    void * data)
 {
     if (pool == NULL) {
-        print_error("thread_pool_submit: pool arg is NULL");
-        exit(EXIT_FAILURE);
+        print_error("thread_pool_submit: pool arg is NULL"); exit(EXIT_FAILURE);
     }
-
     if (task == NULL) {
-        print_error("thread_pool_submit: pool arg is NULL");
-        exit(EXIT_FAILURE);
+        print_error("thread_pool_submit: task arg is NULL"); exit(EXIT_FAILURE);
     }
-
     // check data?
 
     /* Initialize Future struct */
@@ -204,10 +207,9 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->param_for_thread_fp = data;
     p_future->thread_fp = task;
     p_future->result = NULL;
-    //p_future->status = NOT_STARTED;
-    p_future->is_done = false;
+    p_future->status = NOT_STARTED;
+
     // p_future->semaphore???
-    // p_future->condition_variable
 
     /* Acquire lock for the global submission queue */
     if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
@@ -215,20 +217,22 @@ struct future * thread_pool_submit(struct thread_pool *pool,
         exit(EXIT_FAILURE);
     }
 	
-    /* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE?
-       NO.
+    /* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE? no
        - if calling thread is external, then add to global queue.
             - currently tests only have 1 external (initial) submission. More may be added
        - if internal: add to its own queue
        - only IDLE threads look at global queue
-       (https://piazza.com/class/hz79cl74dfv3pf?cid=186)
+       (https://piazza.com/class/hz79cl74dfv3pf?cid=186) */
 
 
     /* add future to global queue (critical section) */
     list_push_back(&pool->gs_queue, &p_future->elem);
 
-    /* TODO
-       Signal/broadcast sleeping threads that work is available (in queue) */
+    /* Broadcast to sleeping threads that work is available (in queue) */
+    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) {
+        print_error("pthread_cond_broadcast() error\n");
+        exit(EXIT_FAILURE);        
+    }
 
     /* release mutex lock */
     if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
@@ -284,25 +288,33 @@ static void * thread_function(void *arg)
     worker = (struct worker *) arg; /* typecast arg */
 
 
-    /*
-    pthread_mutex_init() this worker thread's local_deque_lock
-        ...how
+    /* ADD task to local_deque */
+    
+    /* where are the tasks taken from gs_queue added to local deque? 
+    (1) worker inits its local_deque_lock (moved to worker_init())
+        worker locks its local_deque  
 
-    (1) worker inits its local_deque_lock
-        worker locks its local_deque
         execute tasks in own deque.
         internal submissions added to top of deque (list_push_front)
         thread executes them in LIFO [stack] order. 
         [continue to (2) if completed (1)]
     (2) Check the gs_queue
             [must acquire gs_queue_lock mutex to check size]
-            if (gs_queue.size != 0):
+            while (gs_queue.size != 0):
                 dequeue [list_pop_back()] from gs_queue
                 release gs_queue_lock
                 add dequeued task to local_deque
                 execute task
-            ... see written
-            
+            [no more tasks in global q]    
+            DO NOT CALL pthread_cond_wait() yet! Must do (3), then 
+    (3) Try to steal from ** BOTTOM ** of other worker's dequeue's [list_pop_back]
+                // need to read leapfrog paper make sure...but what spec says
+
+    (4) acquire lock for gs_queue
+        pthread_cond_wait( worker's cond var for gs queue )
+        ...when it awakens due to broadcast being called, it will have reacquired the 
+        gsqueue lock.
+
 
 
     */
@@ -341,23 +353,3 @@ static struct worker * worker_init(struct worker * wkr, unsigned int worker_numb
 
         wkr->currently_has_internal_submission = false;
 }
-
-/*  remove later just here for above fn
-struct worker {
-
-    pthread_t* thread;
-    // TODO: use thread local storage 2.4 in spec
-
-    // local deque of futures
-    struct list/*<Future>*/ /*local_deque;
-
-    unsigned int worker_thread_idx;
-
-    pthread_mutex_t local_deque_lock;
-
-    bool currently_has_internal_submission; // if false: external submission
-
-    struct list_elem elem; // doubly linked list node to be able to add to
-                           // generic coded in list.c & list.h
-};
-*/
