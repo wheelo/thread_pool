@@ -257,7 +257,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
             struct worker* current_worker = list_entry(e, struct worker, elem);
 
-            if (current_worker->thread == this_thread_id) {
+            if (*current_worker->thread == this_thread_id) {
                 if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) {
                     print_error("pthread_mutex_lock() error\n");
                     exit(EXIT_FAILURE);                  
