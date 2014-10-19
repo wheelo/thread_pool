@@ -2,6 +2,7 @@
 
 /* Function Prototypes */
 static void * thread_function(void *arg);
+static struct worker * worker_init(struct worker * wkr, unsigned int worker_number);
 
 /* TODO: global thread-local storage (TLS) variable
    NOTE: POSIX Threads documentation calls TLS 'thread_specific data'. Easier 
@@ -12,8 +13,6 @@ __thread struct thread_pool *pool; // ref to pool. Needed b/c future_get() only
                                    // need to be able to iterate list of 
                                    // worker (worker_list, a member of
                                    // the thread_pool struct)
-
-
 */
 
 
@@ -41,18 +40,22 @@ struct thread_pool {
     */                                          
 };
 
-/* A 'worker' consists of both the thread, the local deque of futures, and other
-   associated data */
-struct worker {
+typedef enum future_status_ {
+  NOT_STARTED,
+  IN_PROGRESS,
+  COMPLETED
+} future_status;
 
+/**
+ * A 'worker' consists of both the thread, the local deque of futures, and other
+ * associated data 
+ */
+struct worker {
     pthread_t* thread;
-    // TODO: use thread local storage 2.4 in spec
 
     unsigned int worker_thread_idx;
 
-    // local deque of futures
     struct list/*<Future>*/ local_deque;
-
     pthread_mutex_t local_deque_lock;
 
     bool currently_has_internal_submission; // if false: external submission
@@ -104,48 +107,49 @@ struct future {
 
     // bool future_get_called;     // don't call future_free() if false
 
-    struct list_elem elem;     // necessary to add to struct list gs_queue
+    struct list_elem elem;
 };
 
 /**
  * @param nthreads = number of threads to create
  */
-struct thread_pool * thread_pool_new(int nthreads)
-{
+struct thread_pool * thread_pool_new(int nthreads) {
 	if (nthreads < 1) {
 		print_error("You must create at least 1 thread\n");
 		return NULL;
 	}
 
-    /* Initialize the thread pool */
+    // Initialize the thread pool
 	struct thread_pool* pool = (struct thread_pool*) 
                                    malloc(sizeof(struct thread_pool));
-	if (pool == NULL)  print_error("malloc() error\n");
+	if (pool == NULL) {
+      print_error("malloc() error\n");
+	} 
 
-    list_init(&pool->gs_queue);     /* global submission queue */
+    list_init(&pool->gs_queue);
     
-    /* Initialize mutex for the global queue */
+    // Initialize mutex for the global queue
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) {
         print_error("pthread_mutex_init() failed\n");
         exit(EXIT_FAILURE);
     }
 
-    /* Initialize condition variable used to broadcast to worker threads that
-       tasks are available in the global submission queue */
+    // Initialize condition variable used to broadcast to worker threads that
+    // tasks are available in the global submission queue 
     if (pthread_cond_init(&pool->gs_queue_has_tasks, NULL) != 0) {
         print_error("pthread_cond_init() failed\n");
         exit(EXIT_FAILURE);
     }
 
-    /* initialize all the workers */
+    // initialize all the workers 
     list_init(&pool->worker_list);
-	//int i;
-	for (int i = 0; i < nthreads; ++i) {
-	    /* malloc worker struct and initialize all of its members */
+	int i;
+	for (i = 0; i < nthreads; ++i) {
+	    // malloc worker struct and initialize all of its members 
 		struct worker *wkr = (struct worker *) malloc(sizeof(struct worker));        
         wkr = worker_init(wkr, i);
 
-        /* add to the pool's list of workers */
+        // add to the pool's list of workers 
         list_push_back(&pool->worker_list, &wkr->elem);
 	}
 
@@ -177,8 +181,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 	return pool;
 }
 
-void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
-{
+void thread_pool_shutdown_and_destroy(struct thread_pool *pool) {
 
     // broadcast - wake up threads asleep
 
@@ -247,8 +250,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
  * Get result of computation.
  * Leapfrogging Paper = http://cseweb.ucsd.edu/~calder/papers/PPoPP-93.pdf
  */
-void * future_get(struct future *f)
-{
+void * future_get(struct future *f) {
     if (f == NULL) {
         print_error("future_free() called with NULL parameter");
         exit(EXIT_FAILURE);
@@ -267,8 +269,7 @@ void * future_get(struct future *f)
     return NULL;
 }
 
-void future_free(struct future *f)
-{
+void future_free(struct future *f) {
     if (f == NULL) {
         print_error("future_free() called with NULL parameter");
         exit(EXIT_FAILURE);
@@ -277,8 +278,7 @@ void future_free(struct future *f)
     // ...
 }
 
-static void * thread_function(void *arg)
-{
+static void * thread_function(void *arg) {
     struct worker *worker;      // the worker that has this thread as a member...
     /* arg should be the worker executing this thread */
     if (arg == NULL) {
@@ -327,29 +327,28 @@ static void * thread_function(void *arg)
  *    worker_number - the index of the worker in the thread_pool's (( array? list? ))
  * Return: pointer to the initialized worker struct
  */
-static struct worker * worker_init(struct worker * wkr, unsigned int worker_number)
-{
+static struct worker * worker_init(struct worker * wkr, unsigned int worker_number) {
+    // malloc the worker's thread
+    pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
+    if (ptr_thread == NULL) {
+        print_error("malloc error\n");
+        exit(EXIT_FAILURE);
+    }
+    wkr->thread = ptr_thread;
 
+    // initialize the worker's deque
+    list_init(&wkr->local_deque); // ...its local_deque
 
-        // malloc the worker's thread
-        pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
-        if (ptr_thread == NULL) {
-            print_error("malloc error\n");
-            exit(EXIT_FAILURE);
-        }
-        wkr->thread = ptr_thread;
+    // lock for the worker's deque
+    if (pthread_mutex_init(&wkr->local_deque_lock, NULL) != 0) {
+        print_error("pthread_mutex_init()\n");
+        exit(EXIT_FAILURE);
+    }
 
-        // initialize the worker's deque
-        list_init(&wkr->local_deque); // ...its local_deque
+    // the index of the worker in the thread pool's array [list?]
+    wkr->worker_thread_idx = worker_number;
 
-        // lock for the worker's deque
-        if (pthread_mutex_init(&wkr->local_deque_lock, NULL) != 0) {
-            print_error("pthread_mutex_init()\n");
-            exit(EXIT_FAILURE);
-        }
+    wkr->currently_has_internal_submission = false;
 
-        // the index of the worker in the thread pool's array [list?]
-        wkr->worker_thread_idx = worker_number;
-
-        wkr->currently_has_internal_submission = false;
+    return wkr;
 }
