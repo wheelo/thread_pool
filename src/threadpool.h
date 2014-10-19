@@ -11,7 +11,7 @@
 #include <stdlib.h> // malloc()
 #include <pthread.h> // pthread_create()
 #include "list.h"
-#include "threadpool_lib.h"  /* print_error() */
+#include "threadpool_lib.h"  /* print_error_and_exit() */
 
 /* 
  * Opaque forward declarations. The actual definitions of these 

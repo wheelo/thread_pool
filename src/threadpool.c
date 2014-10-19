@@ -1,7 +1,7 @@
 #include "threadpool.h"
 
 // private functions for this class that must be declared here to be called below
-static void * thread_function(void *arg);
+static void * thread_function(struct thread_pool *pool);
 static struct worker * worker_init(struct worker * wkr, unsigned int worker_number);
 
 /**
@@ -103,7 +103,7 @@ struct thread_pool * thread_pool_new(int nthreads) {
 
     list_init(&pool->gs_queue);
     
-    // Initialize mutex for the global queue
+    // Initialize mutex for the global submission queue
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
 
     // Initialize condition variable used to broadcast to worker threads that
@@ -115,40 +115,28 @@ struct thread_pool * thread_pool_new(int nthreads) {
 
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
 
+    // Initialize all workers and add to threadpool worker list
 	int i;
 	for (i = 0; i < nthreads; ++i) {
-	    // malloc worker struct and initialize all of its members 
 		struct worker *worker = (struct worker *) malloc(sizeof(struct worker));        
         worker = worker_init(worker, i); 
 
-        // add to the pool's list of workers 
         list_push_back(&pool->worker_list, &worker->elem);
 	}
 
     pool->shutdown_requested = false;
 
-    // iterate through the list of workers and create their threads.
+    // Iterate through the list of workers and create their threads.
 	struct list_elem* e;
 	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
          e = list_next(e)) {
 
         struct worker* current_worker = list_entry(e, struct worker, elem);
-        /* note: unlike process functions this and other pthread_ and sem_ functions
-             can return error codes other than  -1, and return 0 if successful, so check if != 0 */
+ 
 
-        // NOTE: changed 4th arg, the arguments for thread_function, to be
-        //       the worker struct itself. When current_worker's thread is 
-        //       created and thread_function exectures, it will have to have
-        //       a way to do stuff like access its local_deque.
-        // remove these notes later
-        if ( pthread_create(current_worker->thread_id,  // the worker's thread member [will be set to the thread id]
-                            NULL, // default attributes
-                            (void *) &thread_function, // what thread executes
-                            (struct worker *) current_worker) /* argument to thread_function */ 
-                                != 0) {
-	  		print_error_and_exit("pthread_create()\n");
-			
-	    }
+        if (pthread_create(current_worker->thread_id, NULL, (void *) thread_function, (void *) pool) != 0) { 
+        	print_error_and_exit("pthread_create() error\n"); 
+        }
     }
 	return pool;
 }
@@ -285,15 +273,16 @@ void future_free(struct future *f) {
     // ...
 }
 
-static void * thread_function(void *arg) {
+/**
+ * This is the logic for how a worker thread decides to execute a 
+ * task.
+ */
+static void * thread_function(struct thread_pool *pool) {
 	is_worker = true;
-    struct worker *worker;      // the worker that has this thread as a member...
-    /* arg should be the worker executing this thread */
-    if (arg == NULL) {
-        print_error_and_exit("thread_function argument null\n");
-        
-    }
-    worker = (struct worker *) arg; /* typecast arg */
+    //struct worker *worker;      // the worker that has this thread as a member...
+    /* data should be the worker executing this thread */
+
+    //worker = (struct worker *) data; /* typecast arg */
 
 
     /* ADD task to local_deque */
