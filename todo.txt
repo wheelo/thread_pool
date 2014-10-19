@@ -1,0 +1,7 @@
+threadpool todo:
+
+( ) TLS
+( ) leapfrogging/stealing
+( ) future semaphore
+( ) gsq condition variable
+( ) future_get()

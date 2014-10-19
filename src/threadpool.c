@@ -1,35 +1,62 @@
 #include "threadpool.h"
 
+/* Function Prototypes */
 static void * thread_function(void *arg);
 
-struct worker_thread {
-	struct list_elem elem; // doubly linked list node to be able to add to
-						   // generic coded in list.c & list.h
+/* TODO: global thread-local storage (TLS) variable
+   NOTE: POSIX Threads documentation calls TLS 'thread_specific data'. Easier 
+         to find info on them if you search for this.
+__thread bool is_worker; // whether this thread is a worker
+__thread struct thread_pool *pool; // ref to pool. Needed b/c future_get() only
+                                   // has 'future *' as only arg. For stealing,
+                                   // need to be able to iterate list of 
+                                   // worker (worker_list, a member of
+                                   // the thread_pool struct)
 
-	// http://stackoverflow.com/questions/6420090/pthread-concepts-in-linux
-	pthread_t* thread;
-	// TODO: use thread local storage 2.4 in spec
 
-	// local deque of futures
-	struct list/*<Future>*/ local_deque;
-    bool currently_has_internal_submission; // if false: external submission
-};
+*/
+
 
 struct thread_pool {
-	struct list/*<worker_thread>*/ threads_list; 
+    struct list/*<future>*/ gs_queue;   /* global submission queue */
+    pthread_mutex_t gs_queue_lock;      /* lock for global queue */
+    pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
 
-	struct list/*<Future>*/ gs_queue; /* global submission queue */
-	bool is_shutting_down;
+    // NOTE: renamed from thread_list to worker_list, since its a list of worker 
+    // structs that have not just a thread member but deque, other stuff
+	struct list/*<worker>*/ worker_list;  // may be easier to use as an array
 
-    pthread_mutex_t gs_queue_lock;  /* mutex lock for global submission queue */
+	bool shutdown_requested;             /* flag for shutdown */
+
+    
     // TODO: semaphore or condition variable
+
+    /* "simple array of pointers" (https://piazza.com/class/hz79cl74dfv3pf?cid=192)
+     for stealing: pointers to the futures that are stealable?
+     struct future * stealable_futures[]; // init array size to what? some fairly
+                                          // large constant value?
+    */                                          
 };
 
-typedef enum future_status_ {
-  NOT_STARTED,
-  IN_PROGRESS,
-  COMPLETED
-} future_status;
+/* A 'worker' consists of both the thread, the local deque of futures, and other
+   associated data */
+struct worker {
+
+    pthread_t* thread;
+    // TODO: use thread local storage 2.4 in spec
+
+    unsigned int worker_thread_idx;
+
+    // local deque of futures
+    struct list/*<Future>*/ local_deque;
+
+    pthread_mutex_t local_deque_lock;
+
+    bool currently_has_internal_submission; // if false: external submission
+
+    struct list_elem elem; // doubly linked list node to be able to add to
+                           // generic coded in list.c & list.h
+};
 
 /**
  * From 2.4 Basic Strategy
@@ -44,10 +71,24 @@ struct future {
 
     void* result;
 	
-    future_status status;   // NOT_STARTED, IN_PROGRESS, or COMPLETED
+    //future_status status;   // NOT_STARTED, IN_PROGRESS, or COMPLETED
+    bool is_done; 
+
+    bool is_internal_task;      // if thread_pool_submit() called by a worker thread
 
     /* ADD SEMAPHORE !? */
 
+    /* https://piazza.com/class/hz79cl74dfv3pf?cid=192
+    since future_get() takes only a ptr to a future, for stealing, need to
+    access the bool 'currently_has_internal_submission' member in worker.
+    so must be able to access this from future. If we go this route, then we
+    need the following: 
+
+    bool is_internal_task;  // i.e., not external
+    struct worker *owning_worker;
+    // worker must have ref to pool...or have TLS variable for pool
+
+    */
 
 	
     // FOR LEAPFROGGING 
@@ -57,7 +98,6 @@ struct future {
     /* prob not necessary: bool in_gs_queue; */
 
     // ?? piazza __thread bool is_internal_submission; // if false: external submission
-    /* bool is_internal_submission; // if false: external submission */
 
     // bool future_get_called;     // don't call future_free() if false
 
@@ -74,58 +114,63 @@ struct thread_pool * thread_pool_new(int nthreads)
 		return NULL;
 	}
 
-	// http://stackoverflow.com/questions/1963780/when-should-i-use-malloc-in-c-and-when-dont-i
-	struct thread_pool* pool = (struct thread_pool*)
-								malloc(sizeof(struct thread_pool));
-	if (pool == NULL) {
-		print_error("malloc() error\n");
-	}
+    /* Initialize the thread pool */
+	struct thread_pool* pool = (struct thread_pool*) 
+                                   malloc(sizeof(struct thread_pool));
+	if (pool == NULL)  print_error("malloc() error\n");
 
-
-    // TODO: 
-    // at some point (not nec. right here) init semaphore w/ value nthreads,
-    //       or condition var(s)
+    list_init(&pool->gs_queue);     /* global submission queue */
     
-
-    if ( pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0 ) {
-        print_error("pthread_mutex_init(&gs_queue_lock, NULL)\n");
+    /* Initialize mutex for the global queue */
+    if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) {
+        print_error("pthread_mutex_init() failed\n");
+        exit(EXIT_FAILURE);
     }
 
-    pool->is_shutting_down = false;
-    list_init(&pool->threads_list);
-	list_init(&pool->gs_queue);
+    /* Initialize condition variable used to broadcast to worker threads that
+       tasks are available in the global submission queue */
+    if (pthread_cond_init(&pool->gs_queue_has_tasks, NULL) != 0) {
+        print_error("pthread_cond_init() failed\n");
+        exit(EXIT_FAILURE);
+    }
 
-	int i;
-	for (i = 0; i < nthreads; ++i) {
-	    // malloc worker thread
-		struct worker_thread *p_thread_i = (struct worker_thread *) malloc(sizeof(struct worker_thread));
+    /* initialize all the workers */
+    list_init(&pool->worker_list);
+	//int i;
+	for (int i = 0; i < nthreads; ++i) {
+	    /* malloc worker struct and initialize all of its members */
+		struct worker *wkr = (struct worker *) malloc(sizeof(struct worker));        
+        wkr = worker_init(wkr, i);
 
-		// malloc its thread
-		pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t));
-
-        p_thread_i->thread = ptr_thread;
-
-        // Q: why not malloc list_elem? 
-
-
-		// malloc the worker thread's local deque of futures
-        list_push_back(&pool->threads_list, &p_thread_i->elem);
+        /* add to the pool's list of workers */
+        list_push_back(&pool->worker_list, &wkr->elem);
 	}
 
+    pool->shutdown_requested = false;
+
+    // iterate through the list of workers and create their threads.
 	struct list_elem* e;
-	for (e = list_begin(&pool->threads_list); e != list_end(&pool->threads_list);
+	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
          e = list_next(e)) {
 
-        struct worker_thread* current_thread = list_entry(e, struct worker_thread, elem);
+        struct worker* current_worker = list_entry(e, struct worker, elem);
         /* note: unlike process functions this and other pthread_ and sem_ functions
              can return error codes other than  -1, and return 0 if successful, so check if != 0 */
 
-        if ( pthread_create(current_thread->thread, NULL, thread_function, NULL) != 0) {
-	  		print_error("In thread_pool_new() error creating pthread\n");
+        // NOTE: changed 4th arg, the arguments for thread_function, to be
+        //       the worker struct itself. When current_worker's thread is 
+        //       created and thread_function exectures, it will have to have
+        //       a way to do stuff like access its local_deque.
+        // remove these notes later
+        if ( pthread_create(current_worker->thread,  // the worker's thread member [will be set to the thread id]
+                            NULL, // default attributes
+                            (void *) &thread_function, // what thread executes
+                            (struct worker *) current_worker) /* argument to thread_function */ 
+                                != 0) {
+	  		print_error("pthread_create()\n");
 			exit(EXIT_FAILURE);
 	    }
     }
-
 	return pool;
 }
 
@@ -159,17 +204,33 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->param_for_thread_fp = data;
     p_future->thread_fp = task;
     p_future->result = NULL;
-    p_future->status = NOT_STARTED;
+    //p_future->status = NOT_STARTED;
+    p_future->is_done = false;
     // p_future->semaphore???
     // p_future->condition_variable
 
+    /* Acquire lock for the global submission queue */
     if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
         print_error("pthread_mutex_lock() error\n");
         exit(EXIT_FAILURE);
     }
-	// future pointer gets added to gs_queue
+	
+    /* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE?
+       NO.
+       - if calling thread is external, then add to global queue.
+            - currently tests only have 1 external (initial) submission. More may be added
+       - if internal: add to its own queue
+       - only IDLE threads look at global queue
+       (https://piazza.com/class/hz79cl74dfv3pf?cid=186)
+
+
+    /* add future to global queue (critical section) */
     list_push_back(&pool->gs_queue, &p_future->elem);
 
+    /* TODO
+       Signal/broadcast sleeping threads that work is available (in queue) */
+
+    /* release mutex lock */
     if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
         print_error("pthread_mutex_unlock() error\n");
         exit(EXIT_FAILURE);
@@ -214,6 +275,89 @@ void future_free(struct future *f)
 
 static void * thread_function(void *arg)
 {
-    // what code to execute and how do we get it here???
+    struct worker *worker;      // the worker that has this thread as a member...
+    /* arg should be the worker executing this thread */
+    if (arg == NULL) {
+        print_error("thread_function argument null\n");
+        exit(EXIT_FAILURE);
+    }
+    worker = (struct worker *) arg; /* typecast arg */
+
+
+    /*
+    pthread_mutex_init() this worker thread's local_deque_lock
+        ...how
+
+    (1) worker inits its local_deque_lock
+        worker locks its local_deque
+        execute tasks in own deque.
+        internal submissions added to top of deque (list_push_front)
+        thread executes them in LIFO [stack] order. 
+        [continue to (2) if completed (1)]
+    (2) Check the gs_queue
+            [must acquire gs_queue_lock mutex to check size]
+            if (gs_queue.size != 0):
+                dequeue [list_pop_back()] from gs_queue
+                release gs_queue_lock
+                add dequeued task to local_deque
+                execute task
+            ... see written
+            
+
+
+    */
     return NULL;
 }
+
+/* Initialize the worker struct
+ * Arguments:
+ *    wkr - pointer to memory allocated for this struct
+ *    worker_number - the index of the worker in the thread_pool's (( array? list? ))
+ * Return: pointer to the initialized worker struct
+ */
+static struct worker * worker_init(struct worker * wkr, unsigned int worker_number)
+{
+
+
+        // malloc the worker's thread
+        pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
+        if (ptr_thread == NULL) {
+            print_error("malloc error\n");
+            exit(EXIT_FAILURE);
+        }
+        wkr->thread = ptr_thread;
+
+        // initialize the worker's deque
+        list_init(&wkr->local_deque); // ...its local_deque
+
+        // lock for the worker's deque
+        if (pthread_mutex_init(&wkr->local_deque_lock, NULL) != 0) {
+            print_error("pthread_mutex_init()\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // the index of the worker in the thread pool's array [list?]
+        wkr->worker_thread_idx = worker_number;
+
+        wkr->currently_has_internal_submission = false;
+}
+
+/*  remove later just here for above fn
+struct worker {
+
+    pthread_t* thread;
+    // TODO: use thread local storage 2.4 in spec
+
+    // local deque of futures
+    struct list/*<Future>*/ /*local_deque;
+
+    unsigned int worker_thread_idx;
+
+    pthread_mutex_t local_deque_lock;
+
+    bool currently_has_internal_submission; // if false: external submission
+
+    struct list_elem elem; // doubly linked list node to be able to add to
+                           // generic coded in list.c & list.h
+};
+*/

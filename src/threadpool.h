@@ -1,3 +1,9 @@
+/**************************************************
+ * threadpool.h
+ *
+ * A work-stealing, fork-join thread pool.
+ **************************************************/
+
 #ifndef THREADPOOL_H // if unique value THREADPOOL_H is NOT defined
 #define THREADPOOL_H //   define(add) THREADPOOL_H code into file
 
@@ -7,17 +13,14 @@
 #include "list.h"
 #include "threadpool_lib.h"  /* print_error() */
 
-/**
- * threadpool.h
- *
- * A work-stealing, fork-join thread pool.
- */
-
 /* 
  * Opaque forward declarations. The actual definitions of these 
  * types will be local to your threadpool.c implementation.
  */
+/* A fork-join, work-stealing thread pool. Manages a variable number of threads
+   which execute tasks in parallel */
 struct thread_pool;
+/* The result of a computation */
 struct future;
 
 /* Create a new thread pool with no more than n threads. */
@@ -66,5 +69,16 @@ void * future_get(struct future *f);
 
 /* Deallocate this future.  Must be called after future_get() */
 void future_free(struct future *f);
+
+
+/* Enums, Constants, etc. */
+
+/* Replace with bool is_done ? remove if so. Ever in NOT_STARTED?
+typedef enum future_status_ {
+  NOT_STARTED,
+  IN_PROGRESS,
+  COMPLETED
+} future_status;
+*/
 
 #endif
