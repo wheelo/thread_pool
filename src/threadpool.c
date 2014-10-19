@@ -1,7 +1,7 @@
 #include "threadpool.h"
 
 // private functions for this class that must be declared here to be called below
-static void * thread_function(struct thread_pool *pool);
+static void * worker_function(struct thread_pool *pool);
 static struct worker * worker_init(struct worker * worker, unsigned int worker_number);
 
 /**
@@ -54,19 +54,17 @@ struct future {
 
     void* result;
 	
-    future_status status;       // NOT_STARTED, IN_PROGRESS, or COMPLETED
-    //bool is_done; 
-
-    bool is_internal_task;      // if thread_pool_submit() called by a worker thread
-    // TODO: semaphore for what?
-	
-    // FOR LEAPFROGGING 
-    // int idx_in_local_deque;    // call list_size()
-	// int depth; // see the leap frogging paper
+    future_status status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
     // TODO: TA question = How to steal future from another worker if you don't
     //                     wont to take bottom external
-    // bool is_internal_submission; // if false: external submission
+    bool is_internal_task; // if thread_pool_submit() called by a worker thread
+    // TODO: semaphore for what?
+	
+    // ========================= FOR LEAPFROGGING ==============================
+    // int idx_in_local_deque;    // call list_size()
+	// int depth; // see the leap frogging paper
+	// =========================================================================
 
     bool future_get_called; // if false don't call future_free() 
     struct list_elem gs_queue_elem; 
@@ -118,7 +116,7 @@ struct thread_pool * thread_pool_new(int nthreads) {
 
         struct worker* current_worker = list_entry(e, struct worker, elem);
 
-        if (pthread_create(current_worker->thread_id, NULL, (void *) thread_function, (void *) pool) != 0) { 
+        if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, (void *) pool) != 0) { 
         	print_error_and_exit("pthread_create() error\n"); 
         }
     }
@@ -150,24 +148,14 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->task_fp = task;
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
+    // TODO: p_future->semaphore = ???
 
-    // p_future->semaphore???
-
-    /* if this thread is not a worker, add future to global queue */
+    // if this thread is not a worker, add future to global queue 
     if (!is_worker) {
-
-    	/* Acquire lock for the global submission queue */
+    	// Acquire lock for the global submission queue 
     	if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
 	
-	    	/* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE? no
-	       - if calling thread is external, then add to global queue.
-	            - currently tests only have 1 external (initial) submission. More may be added
-	       - if internal: add to its own queue
-	       - only IDLE threads look at global queue
-	       (https://piazza.com/class/hz79cl74dfv3pf?cid=186) */
-
-
-	    /* add future to global queue (critical section) */
+	    // add external future to global queue (critical section) 
 	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
 
 	    /* Broadcast to sleeping threads that work is available (in queue) */
@@ -194,7 +182,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
             if (*current_worker->thread_id == this_thread_id) {
                 if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
-                // add future to the worker thread's local dequeue
+                // add internal future to the worker thread's local dequeue
                 list_push_front(&current_worker->local_deque, &p_future->deque_elem);       
                 if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }                            
             }
@@ -232,8 +220,17 @@ void future_free(struct future *f) {
  * This is the logic for how a worker thread decides to execute a 
  * task.
  */
-static void * thread_function(struct thread_pool *pool) {
+static void * worker_function(struct thread_pool *pool) {
 	is_worker = true;
+	/*
+	while(true) {
+
+		while(gs_queue is empty) {
+
+		}
+
+	}
+	*/
     //struct worker *worker;      // the worker that has this thread as a member...
     /* data should be the worker executing this thread */
 
