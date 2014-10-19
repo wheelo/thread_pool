@@ -20,7 +20,8 @@ struct thread_pool {
 
 	struct list/*<Worker>*/ worker_list;
 	struct list/*<Future>*/ future_list;
-	//pthread_mutex_t future_list_lock
+	pthread_mutex_t future_list_lock;
+
 	bool shutdown_requested;                                        
 };
 
@@ -124,6 +125,13 @@ struct thread_pool * thread_pool_new(int nthreads) {
     // initialize all the workers 
     list_init(&pool->worker_list);
     list_init(&pool->future_list);
+
+    // Initialize mutex for the list of available futures
+    if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) {
+        print_error("pthread_mutex_init() failed\n");
+        exit(EXIT_FAILURE);
+    }
+
 	int i;
 	for (i = 0; i < nthreads; ++i) {
 	    // malloc worker struct and initialize all of its members 
@@ -198,7 +206,6 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     /* if this thread is not a worker, add future to global queue */
     if (!is_worker) {
 
-
     	/* Acquire lock for the global submission queue */
     	if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
         	print_error("pthread_mutex_lock() error\n");
@@ -228,7 +235,45 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 	        exit(EXIT_FAILURE);
 	    }
 
-	} else {
+	} 
+    else { /* is a worker thread */
+        // add to the future list
+        if (pthread_mutex_lock(&pool->future_list_lock) != 0) {
+            print_error("pthread_mutex_lock() error\n");
+            exit(EXIT_FAILURE);            
+        }
+        list_push_back(&pool->future_list, &p_future->elem);
+        if (pthread_mutex_unlock(&pool->future_list_lock) != 0) {
+            print_error("pthread_mutex_unlock() error\n");
+            exit(EXIT_FAILURE);            
+        }        
+
+        // add to the top of local_deque of the worker thread calling the thread_pool_submit()
+        pthread_t this_thread_id = pthread_self();
+        // loop through pool's worker_list to find the worker struct with this thread's tid
+        struct list_elem* e;
+        for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
+            e = list_next(e)) {
+
+            struct worker* current_worker = list_entry(e, struct worker, elem);
+
+            if (current_worker->thread == this_thread_id) {
+                if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) {
+                    print_error("pthread_mutex_lock() error\n");
+                    exit(EXIT_FAILURE);                  
+                }
+                // add future to the worker thread's local dequeue
+                list_push_front(&current_worker->local_deque, &p_future->elem);       
+                if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) {
+                    print_error("pthread_mutex_unlock() error\n");
+                    exit(EXIT_FAILURE);            
+                }                            
+            }
+        }
+
+
+
+
 
 	}
 
