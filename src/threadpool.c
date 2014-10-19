@@ -2,7 +2,7 @@
 
 // private functions for this class that must be declared here to be called below
 static void * thread_function(struct thread_pool *pool);
-static struct worker * worker_init(struct worker * wkr, unsigned int worker_number);
+static struct worker * worker_init(struct worker * worker, unsigned int worker_number);
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -132,7 +132,6 @@ struct thread_pool * thread_pool_new(int nthreads) {
          e = list_next(e)) {
 
         struct worker* current_worker = list_entry(e, struct worker, elem);
- 
 
         if (pthread_create(current_worker->thread_id, NULL, (void *) thread_function, (void *) pool) != 0) { 
         	print_error_and_exit("pthread_create() error\n"); 
@@ -157,13 +156,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                                    fork_join_task_t task,
                                    void * data)
 {
-    if (pool == NULL) {
-        print_error_and_exit("thread_pool_submit: pool arg is NULL"); 
-    }
-    if (task == NULL) {
-        print_error_and_exit("thread_pool_submit: task arg is NULL"); 
-    }
-    // check data?
+    if (pool == NULL) { print_error_and_exit("thread_pool_submit: pool arg is NULL"); }
+    if (task == NULL) { print_error_and_exit("thread_pool_submit: task arg is NULL"); }
 
     /* Initialize Future struct */
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
@@ -178,10 +172,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     if (!is_worker) {
 
     	/* Acquire lock for the global submission queue */
-    	if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
-        	print_error_and_exit("pthread_mutex_lock() error\n");
-        	
-    	}
+    	if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
 	
 	    	/* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE? no
 	       - if calling thread is external, then add to global queue.
@@ -195,29 +186,16 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 	    list_push_back(&pool->gs_queue, &p_future->elem);
 
 	    /* Broadcast to sleeping threads that work is available (in queue) */
-	    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) {
-	        print_error_and_exit("pthread_cond_broadcast() error\n");
-	                
-	    }
+	    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast() error\n"); }
 
 	    /* release mutex lock */
-	    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
-	        print_error_and_exit("pthread_mutex_unlock() error\n");
-	        
-	    }
-
+	    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }
 	} 
     else { /* is a worker thread */
         // add to the future list
-        if (pthread_mutex_lock(&pool->future_list_lock) != 0) {
-            print_error_and_exit("pthread_mutex_lock() error\n");
-                        
-        }
+        if (pthread_mutex_lock(&pool->future_list_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
         list_push_back(&pool->future_list, &p_future->elem);
-        if (pthread_mutex_unlock(&pool->future_list_lock) != 0) {
-            print_error_and_exit("pthread_mutex_unlock() error\n");
-                        
-        }        
+        if (pthread_mutex_unlock(&pool->future_list_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }        
 
         // add to the top of local_deque of the worker thread calling the thread_pool_submit()
         pthread_t this_thread_id = pthread_self();
@@ -229,16 +207,10 @@ struct future * thread_pool_submit(struct thread_pool *pool,
             struct worker* current_worker = list_entry(e, struct worker, elem);
 
             if (*current_worker->thread_id == this_thread_id) {
-                if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) {
-                    print_error_and_exit("pthread_mutex_lock() error\n");
-                                      
-                }
+                if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
                 // add future to the worker thread's local dequeue
                 list_push_front(&current_worker->local_deque, &p_future->elem);       
-                if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) {
-                    print_error_and_exit("pthread_mutex_unlock() error\n");
-                                
-                }                            
+                if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }                            
             }
         }
 	}
@@ -265,10 +237,7 @@ void * future_get(struct future *f) {
 }
 
 void future_free(struct future *f) {
-    if (f == NULL) {
-        print_error_and_exit("future_free() called with NULL parameter");
-        
-    }
+    if (f == NULL) { print_error_and_exit("future_free() called with NULL parameter"); }
 
     // ...
 }
@@ -311,41 +280,31 @@ static void * thread_function(struct thread_pool *pool) {
         pthread_cond_wait( worker's cond var for gs queue )
         ...when it awakens due to broadcast being called, it will have reacquired the 
         gsqueue lock.
-
-
-
     */
     return NULL;
 }
 
 /* Initialize the worker struct
  * Arguments:
- *    wkr - pointer to memory allocated for this struct
+ *    worker - pointer to memory allocated for this struct
  *    worker_number - the index of the worker in the thread_pool's (( array? list? ))
  * Return: pointer to the initialized worker struct
  */
-static struct worker * worker_init(struct worker * wkr, unsigned int worker_number) {
+static struct worker * worker_init(struct worker * worker, unsigned int worker_number) {
     // malloc the worker's thread
     pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
-    if (ptr_thread == NULL) {
-        print_error_and_exit("malloc error\n");
-        
-    }
-    wkr->thread_id = ptr_thread;
+    if (ptr_thread == NULL) { print_error_and_exit("malloc error\n"); }
+    worker->thread_id = ptr_thread;
 
     // initialize the worker's deque
-    list_init(&wkr->local_deque); // ...its local_deque
+    list_init(&worker->local_deque); // ...its local_deque
 
     // lock for the worker's deque
-    if (pthread_mutex_init(&wkr->local_deque_lock, NULL) != 0) {
-        print_error_and_exit("pthread_mutex_init()\n");
-        
-    }
+    if (pthread_mutex_init(&worker->local_deque_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init()\n"); }
 
     // the index of the worker in the thread pool's array [list?]
-    wkr->worker_thread_idx = worker_number;
+    worker->worker_thread_idx = worker_number;
 
-    wkr->currently_has_internal_submission = false;
-
-    return wkr;
+    worker->currently_has_internal_submission = false; 
+    return worker;
 }
