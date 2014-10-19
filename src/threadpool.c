@@ -117,7 +117,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
         struct worker* current_worker = list_entry(e, struct worker, elem);
 
-        if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, (void *) pool) != 0) { 
+        if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, pool) != 0) { 
         	print_error_and_exit("pthread_create() error\n"); 
         }
     }
@@ -227,7 +227,7 @@ void future_free(struct future *f)
 static void * worker_function(struct thread_pool *pool) 
 {
 	is_worker = true;
-	
+
 	while(true) {
 
 
