@@ -54,7 +54,7 @@ struct future {
 
     void* result;
 	
-    future_status status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
+    FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
     // TODO: TA question = How to steal future from another worker if you don't
     //                     wont to take bottom external
@@ -75,7 +75,8 @@ struct future {
 /**
  * @param nthreads = number of threads to create
  */
-struct thread_pool * thread_pool_new(int nthreads) {
+struct thread_pool * thread_pool_new(int nthreads) 
+{
 	if (nthreads < 1) { print_error_and_exit("You must create at least 1 thread\n"); }
 
 	is_worker = false;
@@ -123,7 +124,8 @@ struct thread_pool * thread_pool_new(int nthreads) {
 	return pool;
 }
 
-void thread_pool_shutdown_and_destroy(struct thread_pool *pool) {
+void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
+{
 
     // broadcast - wake up threads asleep
 
@@ -195,7 +197,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
  * Get result of computation.
  * Leapfrogging Paper = http://cseweb.ucsd.edu/~calder/papers/PPoPP-93.pdf
  */
-void * future_get(struct future *f) {
+void * future_get(struct future *f) 
+{
     if (f == NULL) {
         print_error_and_exit("future_get() called with NULL parameter");
         
@@ -210,7 +213,8 @@ void * future_get(struct future *f) {
     }
 }
 
-void future_free(struct future *f) {
+void future_free(struct future *f) 
+{
     if (f == NULL) { print_error_and_exit("future_free() called with NULL parameter"); }
 
     // ...
@@ -220,17 +224,16 @@ void future_free(struct future *f) {
  * This is the logic for how a worker thread decides to execute a 
  * task.
  */
-static void * worker_function(struct thread_pool *pool) {
+static void * worker_function(struct thread_pool *pool) 
+{
 	is_worker = true;
-	/*
+	
 	while(true) {
 
-		while(gs_queue is empty) {
 
-		}
 
 	}
-	*/
+	
     //struct worker *worker;      // the worker that has this thread as a member...
     /* data should be the worker executing this thread */
 
@@ -273,7 +276,8 @@ static void * worker_function(struct thread_pool *pool) {
  *    worker_number - the index of the worker in the thread_pool's (( array? list? ))
  * Return: pointer to the initialized worker struct
  */
-static struct worker * worker_init(struct worker * worker, unsigned int worker_number) {
+static struct worker * worker_init(struct worker * worker, unsigned int worker_number) 
+{
     // malloc the worker's thread
     pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
     if (ptr_thread == NULL) { print_error_and_exit("malloc error\n"); }
