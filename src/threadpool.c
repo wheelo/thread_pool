@@ -30,7 +30,7 @@ struct thread_pool {
  * associated data 
  */
 struct worker {
-    pthread_t* thread;
+    pthread_t* thread_id;
 
     unsigned int worker_thread_idx;
 
@@ -158,7 +158,7 @@ struct thread_pool * thread_pool_new(int nthreads) {
         //       created and thread_function exectures, it will have to have
         //       a way to do stuff like access its local_deque.
         // remove these notes later
-        if ( pthread_create(current_worker->thread,  // the worker's thread member [will be set to the thread id]
+        if ( pthread_create(current_worker->thread_id,  // the worker's thread member [will be set to the thread id]
                             NULL, // default attributes
                             (void *) &thread_function, // what thread executes
                             (struct worker *) current_worker) /* argument to thread_function */ 
@@ -257,7 +257,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
             struct worker* current_worker = list_entry(e, struct worker, elem);
 
-            if (*current_worker->thread == this_thread_id) {
+            if (*current_worker->thread_id == this_thread_id) {
                 if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) {
                     print_error("pthread_mutex_lock() error\n");
                     exit(EXIT_FAILURE);                  
@@ -270,13 +270,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                 }                            
             }
         }
-
-
-
-
-
 	}
-
 	return NULL;
 }
 
@@ -365,7 +359,7 @@ static struct worker * worker_init(struct worker * wkr, unsigned int worker_numb
         print_error("malloc error\n");
         exit(EXIT_FAILURE);
     }
-    wkr->thread = ptr_thread;
+    wkr->thread_id = ptr_thread;
 
     // initialize the worker's deque
     list_init(&wkr->local_deque); // ...its local_deque
