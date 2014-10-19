@@ -47,7 +47,8 @@ count_number_of_threads(void)
     abort();
 }
 
-void print_error(char* err_msg) 
+void print_error_and_exit(char* error_message) 
 {
-    write(ERR, err_msg, strlen(err_msg));
+    write(ERR, error_message, strlen(error_message));
+    exit(EXIT_FAILURE);
 }
