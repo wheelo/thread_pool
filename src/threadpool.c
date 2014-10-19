@@ -18,7 +18,7 @@ struct thread_pool {
     pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
     // TODO: ask TA about conditional variables needed
 
-	struct list/*<Worker>*/ worker_list;
+	struct list/*<Worker>*/ worker_list; // TODO: make into array
 	struct list/*<Future>*/ future_list;
 	pthread_mutex_t future_list_lock;
 
@@ -50,9 +50,7 @@ struct worker {
  */
 struct future {
     void* param_for_task_fp; 
-    // Note: fork_join_task_t defn
-    // void * (* fork_join_task_t) (struct thread_pool *pool, void *data);
-    fork_join_task_t task_fp;   /* pointer to the function to be called */
+    fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
     void* result;
 	
@@ -60,33 +58,20 @@ struct future {
     //bool is_done; 
 
     bool is_internal_task;      // if thread_pool_submit() called by a worker thread
-
-    /* ADD SEMAPHORE !? */
-
-    /* https://piazza.com/class/hz79cl74dfv3pf?cid=192
-    since future_get() takes only a ptr to a future, for stealing, need to
-    access the bool 'currently_has_internal_submission' member in worker.
-    so must be able to access this from future. If we go this route, then we
-    need the following: 
-
-    bool is_internal_task;  // i.e., not external
-    struct worker *owning_worker;
-    // worker must have ref to pool...or have TLS variable for pool
-
-    */
-
+    // TODO: semaphore for what?
 	
     // FOR LEAPFROGGING 
     // int idx_in_local_deque;    // call list_size()
 	// int depth; // see the leap frogging paper
 
-    /* prob not necessary: bool in_gs_queue; */
+    // TODO: TA question = How to steal future from another worker if you don't
+    //                     wont to take bottom external
+    // bool is_internal_submission; // if false: external submission
 
-    // ?? piazza __thread bool is_internal_submission; // if false: external submission
-
-    // bool future_get_called;     // don't call future_free() if false
-
-    struct list_elem elem;
+    bool future_get_called; // if false don't call future_free() 
+    struct list_elem gs_queue_elem; 
+    struct list_elem future_list_elem;
+    struct list_elem deque_elem;
 };
 
 /**
@@ -183,7 +168,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
 
 	    /* add future to global queue (critical section) */
-	    list_push_back(&pool->gs_queue, &p_future->elem);
+	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
 
 	    /* Broadcast to sleeping threads that work is available (in queue) */
 	    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast() error\n"); }
@@ -194,12 +179,13 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     else { /* is a worker thread */
         // add to the future list
         if (pthread_mutex_lock(&pool->future_list_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
-        list_push_back(&pool->future_list, &p_future->elem);
+        list_push_back(&pool->future_list, &p_future->future_list_elem);
         if (pthread_mutex_unlock(&pool->future_list_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }        
 
         // add to the top of local_deque of the worker thread calling the thread_pool_submit()
         pthread_t this_thread_id = pthread_self();
         // loop through pool's worker_list to find the worker struct with this thread's tid
+
         struct list_elem* e;
         for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
             e = list_next(e)) {
@@ -209,7 +195,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
             if (*current_worker->thread_id == this_thread_id) {
                 if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
                 // add future to the worker thread's local dequeue
-                list_push_front(&current_worker->local_deque, &p_future->elem);       
+                list_push_front(&current_worker->local_deque, &p_future->deque_elem);       
                 if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }                            
             }
         }
