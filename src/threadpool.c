@@ -1,50 +1,28 @@
 #include "threadpool.h"
 
-/* Function Prototypes */
+// private functions for this class that must be declared here to be called below
 static void * thread_function(void *arg);
 static struct worker * worker_init(struct worker * wkr, unsigned int worker_number);
 
-/* TODO: global thread-local storage (TLS) variable
-   NOTE: POSIX Threads documentation calls TLS 'thread_specific data'. Easier 
-         to find info on them if you search for this.
-__thread bool is_worker; // whether this thread is a worker
-__thread struct thread_pool *pool; // ref to pool. Needed b/c future_get() only
-                                   // has 'future *' as only arg. For stealing,
-                                   // need to be able to iterate list of 
-                                   // worker (worker_list, a member of
-                                   // the thread_pool struct)
-*/
-
+/**
+ * Each thread has this local variable. Even though it is declared like a 
+ * global variable it is NOT. 
+ * NOTE: remember that there is already 1 thread running the main code besides
+ *       the worker threads you create in thread_pool_new().
+ */
+__thread bool is_worker; 
 
 struct thread_pool {
-    struct list/*<future>*/ gs_queue;   /* global submission queue */
-    pthread_mutex_t gs_queue_lock;      /* lock for global queue */
+    struct list/*<Future>*/ gs_queue;  
+    pthread_mutex_t gs_queue_lock;      
     pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
+    // TODO: ask TA about conditional variables needed
 
-    // TODO: also may need additional cond - can_steal, or combine that with above (tasks_available_in_pool)
-    //       or may be good enough without 2nd if worker still tries to steal.
-
-    // NOTE: renamed from thread_list to worker_list, since its a list of worker 
-    // structs that have not just a thread member but deque, other stuff
-	struct list/*<worker>*/ worker_list;  // may be easier to use as an array
-
-	bool shutdown_requested;             /* flag for shutdown */
-
-    
-    // TODO: semaphore or condition variable
-
-    /* "simple array of pointers" (https://piazza.com/class/hz79cl74dfv3pf?cid=192)
-     for stealing: pointers to the futures that are stealable?
-     struct future * stealable_futures[]; // init array size to what? some fairly
-                                          // large constant value?
-    */                                          
+	struct list/*<Worker>*/ worker_list;
+	struct list/*<Future>*/ future_list;
+	//pthread_mutex_t future_list_lock
+	bool shutdown_requested;                                        
 };
-
-typedef enum future_status_ {
-  NOT_STARTED,
-  IN_PROGRESS,
-  COMPLETED
-} future_status;
 
 /**
  * A 'worker' consists of both the thread, the local deque of futures, and other
@@ -119,6 +97,8 @@ struct thread_pool * thread_pool_new(int nthreads) {
 		return NULL;
 	}
 
+	is_worker = false;
+
     // Initialize the thread pool
 	struct thread_pool* pool = (struct thread_pool*) 
                                    malloc(sizeof(struct thread_pool));
@@ -143,6 +123,7 @@ struct thread_pool * thread_pool_new(int nthreads) {
 
     // initialize all the workers 
     list_init(&pool->worker_list);
+    list_init(&pool->future_list);
 	int i;
 	for (i = 0; i < nthreads; ++i) {
 	    // malloc worker struct and initialize all of its members 
@@ -214,34 +195,42 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
     // p_future->semaphore???
 
-    /* Acquire lock for the global submission queue */
-    if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
-        print_error("pthread_mutex_lock() error\n");
-        exit(EXIT_FAILURE);
-    }
+    /* if this thread is not a worker, add future to global queue */
+    if (!is_worker) {
+
+
+    	/* Acquire lock for the global submission queue */
+    	if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
+        	print_error("pthread_mutex_lock() error\n");
+        	exit(EXIT_FAILURE);
+    	}
 	
-    /* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE? no
-       - if calling thread is external, then add to global queue.
-            - currently tests only have 1 external (initial) submission. More may be added
-       - if internal: add to its own queue
-       - only IDLE threads look at global queue
-       (https://piazza.com/class/hz79cl74dfv3pf?cid=186) */
+	    	/* DO ALL NEW TASKS SUBMITTED TO THE POOL ALWAYS GO TO THE GLOBAL QUEUE? no
+	       - if calling thread is external, then add to global queue.
+	            - currently tests only have 1 external (initial) submission. More may be added
+	       - if internal: add to its own queue
+	       - only IDLE threads look at global queue
+	       (https://piazza.com/class/hz79cl74dfv3pf?cid=186) */
 
 
-    /* add future to global queue (critical section) */
-    list_push_back(&pool->gs_queue, &p_future->elem);
+	    /* add future to global queue (critical section) */
+	    list_push_back(&pool->gs_queue, &p_future->elem);
 
-    /* Broadcast to sleeping threads that work is available (in queue) */
-    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) {
-        print_error("pthread_cond_broadcast() error\n");
-        exit(EXIT_FAILURE);        
-    }
+	    /* Broadcast to sleeping threads that work is available (in queue) */
+	    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) {
+	        print_error("pthread_cond_broadcast() error\n");
+	        exit(EXIT_FAILURE);        
+	    }
 
-    /* release mutex lock */
-    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
-        print_error("pthread_mutex_unlock() error\n");
-        exit(EXIT_FAILURE);
-    }
+	    /* release mutex lock */
+	    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
+	        print_error("pthread_mutex_unlock() error\n");
+	        exit(EXIT_FAILURE);
+	    }
+
+	} else {
+
+	}
 
 	return NULL;
 }
@@ -252,21 +241,17 @@ struct future * thread_pool_submit(struct thread_pool *pool,
  */
 void * future_get(struct future *f) {
     if (f == NULL) {
-        print_error("future_free() called with NULL parameter");
+        print_error("future_get() called with NULL parameter");
         exit(EXIT_FAILURE);
     }
-    // How do you find future? iterate through list of gs_queue and worker thread deques?
 
-    /*
-    if future is completed
-      return result
-    else if future has notStarted
-      a unbusy worker thread can steal it and execute it itself
-    else // future inProgress
-      2.2 in spec "help executing tasks spawned by the task being joined" ??
-    */
-
-    return NULL;
+    if (is_worker) {
+    	// TODO:
+ 		return NULL;
+    } else {
+    	// TODO:
+    	return NULL;
+    }
 }
 
 void future_free(struct future *f) {
@@ -279,6 +264,7 @@ void future_free(struct future *f) {
 }
 
 static void * thread_function(void *arg) {
+	is_worker = true;
     struct worker *worker;      // the worker that has this thread as a member...
     /* arg should be the worker executing this thread */
     if (arg == NULL) {
