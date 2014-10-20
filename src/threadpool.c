@@ -141,6 +141,18 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 	// call pthread_join() on threads to wait for them to finish and reap
 	// their resources
 	// DON'T use pthread_cancel()
+	if (pool->shutdown_requested == true) {
+		return; // if already called thread_pool_shutdown_and_destroy()
+	}
+	pool->shutdown_requested = true;
+
+	struct list_elem *e;
+	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list); e = list_next(e)) {
+		struct worker *worker = list_entry(e, struct worker, elem);
+		pthread_join(*worker->thread_id, NULL);
+	}
+
+	// destroy other stuff
 
 }
 
