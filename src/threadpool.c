@@ -66,7 +66,7 @@ struct worker {
 struct thread_pool {
     struct list/*<Future>*/ gs_queue;  
     pthread_mutex_t gs_queue_lock;      
-    pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
+    pthread_cond_t gs_queue_has_tasks;  
     // TODO: ask TA about conditional variables needed
 
 	struct list/*<Worker>*/ worker_list; // TODO: make into array
@@ -133,6 +133,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
+	if (pool == NULL) { print_error_and_exit("hread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
 
     // broadcast - wake up threads asleep
 
@@ -141,15 +142,14 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 	// their resources
 	// DON'T use pthread_cancel()
 
-	// what signaling strategy to use?
 }
 
 struct future * thread_pool_submit(struct thread_pool *pool,
                                    fork_join_task_t task,
                                    void * data)
 {
-    if (pool == NULL) { print_error_and_exit("thread_pool_submit: pool arg is NULL"); }
-    if (task == NULL) { print_error_and_exit("thread_pool_submit: task arg is NULL"); }
+    if (pool == NULL) { print_error_and_exit("thread_pool_submit() pool arg cannot be NULL"); }
+    if (task == NULL) { print_error_and_exit("thread_pool_submit() task arg cannot be NULL"); }
 
     /* Initialize Future struct */
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
@@ -241,7 +241,8 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 			pthread_mutex_unlock(&pool->gs_queue_lock);
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
-		} // TODO: else work stealing...
+		} 
+		// TODO: else work stealing...
 		// "Otherwise, the worker attempts to steal tasks to work on from the
 		//  bottom of other threads' queues"
 	}
