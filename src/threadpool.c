@@ -10,14 +10,10 @@ struct thread_pool_and_current_worker {
 	struct worker *worker;
 };
 
-
 // private functions for this class that must be declared here to be called below
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
 static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index);
 static void worker_free(struct worker *worker);
-
-
-
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -26,7 +22,6 @@ static void worker_free(struct worker *worker);
  *       the worker threads you create in thread_pool_new().
  */
 __thread bool is_worker; 
-
 
 struct thread_pool {
     struct list/*<Future>*/ gs_queue;  
@@ -72,13 +67,15 @@ struct worker {
  * to that function, as well as the result(when available).
  */
 struct future {
-    void* param_for_task_fp; 
+    void *param_for_task_fp; 
     fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
-    void* result;
+    void *result;
     sem_t semaphore; // for if result is finished computing
     
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
+
+    threadpool *p_pool;  
 
     // TODO: TA question = How to steal future from another worker if you don't
     //                     wont to take bottom external
@@ -88,7 +85,6 @@ struct future {
     struct list_elem gs_queue_elem; 
     struct list_elem deque_elem;
 };
-
 
 /**
  * @param nthreads = number of threads to create
@@ -254,11 +250,14 @@ void * future_get(struct future *f)
         // and the first future generated 2 other futures then the 1 thread
         // would execute 1 of the 2 generated futures and then deadlock.
         else if (f->status == NOT_STARTED) {
-            // TODO:??? f->result = (*(f->task_fp))(pool, f->param_for_task_fp);
-            f->status = COMPLETED;
-            sem_post(&f->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            void *result = (*(future->task_fp))(f->p_pool, future->param_for_task_fp);
+
+            // lock
+            future->result = result;
+            future->status = COMPLETED;
+            sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            // unlock
         }
-        return f->result;
     } else { 
         // thread executing this is not a worker thread so it is safe to 
         // sem_wait()
@@ -295,18 +294,26 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
 
-			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+            void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
+
+            // lock
+			future->result = result;
             future->status = COMPLETED;
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            // unlock
 		} // else if there are futures in gs_queue execute them second 
 		else if (!list_empty(&pool->gs_queue)) {
 			pthread_mutex_lock(&pool->gs_queue_lock);
 			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
 			pthread_mutex_unlock(&pool->gs_queue_lock);
 
-			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+			void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
+
+            // lock
+            future->result = result;
             future->status = COMPLETED;
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            // unlock
 		} 
 		// TODO: else work stealing...
 		// "Otherwise, the worker attempts to steal tasks to work on from the
