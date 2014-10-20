@@ -10,6 +10,10 @@ struct thread_pool_and_current_worker {
 	struct worker *worker;
 };
 
+
+/*** testing git push from rlogin ****/
+
+
 // private functions for this class that must be declared here to be called below
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
 static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index);
