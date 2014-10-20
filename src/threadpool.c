@@ -176,6 +176,8 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list); e = list_next(e)) {
 		struct worker *worker = list_entry(e, struct worker, elem);
 		pthread_join(*worker->thread_id, NULL);
+
+        worker_free(worker);
 	}
 
 	// destroy other stuff
@@ -254,9 +256,9 @@ void * future_get(struct future *f)
         // and the first future generated 2 other futures then the 1 thread
         // would execute 1 of the 2 generated futures and then deadlock.
         else if (f->status == NOT_STARTED) {
-            //future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
-            future->status = COMPLETED;
-            sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            // TODO:??? f->result = (*(f->task_fp))(pool, f->param_for_task_fp);
+            f->status = COMPLETED;
+            sem_post(&f->semaphore); // increment_and_wake_a_waiting_thread_if_any()
         }
         return f->result;
     } else { 
@@ -341,7 +343,6 @@ static struct worker * worker_init(struct worker *worker, unsigned int worker_th
 /**
  * Free all memory allocated to the worker struct.
  * @param worker = pointer to the worker to free
- * @return Return 0 if successful, or 1 if error
  */
 static void worker_free(struct worker *worker)
 {
