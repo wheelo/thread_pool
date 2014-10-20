@@ -43,6 +43,11 @@ struct future {
     bool future_get_called; // if false don't call future_free() 
     struct list_elem gs_queue_elem; 
     struct list_elem deque_elem;
+
+    // for leapfrogging
+    int worker_id; // index of the worker that is evaluating the future, if any
+    int creator_id; // index of the worker in whose work deque the future
+                    // was placed when it was created.
 };
 
 /**
@@ -215,7 +220,26 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 void * future_get(struct future *f) 
 {
     if (f == NULL) { print_error_and_exit("future_get() called with NULL parameter"); }
-    sem_wait(&f->semaphore);
+
+    if (is_worker) {
+        // below if statement is for when the threadpool has 1 thread and 
+        // multiple futures. You cannot just simply call sem_wait() here
+        // because if 1 worker thread calls sem_post() on the first future
+        // and the first future generated 2 other futures then the 1 thread
+        // would execute of the 2 generated futures and then deadlock
+        if (f->status == NOT_STARTED) {
+            // since future has not started just execute it yourself
+
+        }
+
+    } else { 
+        // thread executing this is not a worker thread so it is safe to 
+        // sem_wait()
+        sem_wait(&f->semaphore); // decrement_and_block_if_the_result_is_negative()
+        // when the value is incremented by worker_function the result will be 
+        // computed
+    }
+
     return f->result;
 }
 
@@ -242,7 +266,9 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 			// "Workers execute tasks by removing them from the top" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
+            // TODO: do I need to lock?
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+            future->status = COMPLETED;
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
 		} // else if there are futures in gs_queue execute them second 
 		else if (!list_empty(&pool->gs_queue)) {
@@ -252,6 +278,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
 			pthread_mutex_unlock(&pool->gs_queue_lock);
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+            future->status = COMPLETED;
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
 		} 
 		// TODO: else work stealing...
