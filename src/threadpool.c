@@ -1,8 +1,18 @@
 #include "threadpool.h"
 
+/**
+ * Holds the threadpool and the current worker to be passed in to function
+ * worker_function() so that this function can do future execution and
+ * future stealing logic.
+ */
+struct thread_pool_and_current_worker {
+	struct thread_pool *pool;
+	struct worker *worker;
+};
+
 // private functions for this class that must be declared here to be called below
-static void * worker_function(struct thread_pool *pool);
-static struct worker * worker_init(struct worker * worker, unsigned int worker_number);
+static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
+static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index);
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -11,37 +21,6 @@ static struct worker * worker_init(struct worker * worker, unsigned int worker_n
  *       the worker threads you create in thread_pool_new().
  */
 __thread bool is_worker; 
-
-struct thread_pool {
-    struct list/*<Future>*/ gs_queue;  
-    pthread_mutex_t gs_queue_lock;      
-    pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
-    // TODO: ask TA about conditional variables needed
-
-	struct list/*<Worker>*/ worker_list; // TODO: make into array
-	struct list/*<Future>*/ future_list;
-	pthread_mutex_t future_list_lock;
-
-	bool shutdown_requested;                                        
-};
-
-/**
- * A 'worker' consists of both the thread, the local deque of futures, and other
- * associated data 
- */
-struct worker {
-    pthread_t* thread_id;
-
-    unsigned int worker_thread_idx;
-
-    struct list/*<Future>*/ local_deque;
-    pthread_mutex_t local_deque_lock;
-
-    bool currently_has_internal_submission; // if false: external submission
-
-    struct list_elem elem; // doubly linked list node to be able to add to
-                           // generic coded in list.c & list.h
-};
 
 /**
  * From 2.4 Basic Strategy
@@ -60,6 +39,7 @@ struct future {
     //                     wont to take bottom external
     bool is_internal_task; // if thread_pool_submit() called by a worker thread
     // TODO: semaphore for what?
+    sem_t semaphore;
 	
     // ========================= FOR LEAPFROGGING ==============================
     // int idx_in_local_deque;    // call list_size()
@@ -70,6 +50,37 @@ struct future {
     struct list_elem gs_queue_elem; 
     struct list_elem future_list_elem;
     struct list_elem deque_elem;
+};
+
+/**
+ * A 'worker' consists of both the thread, the local deque of futures, and other
+ * associated data 
+ */
+struct worker {
+    pthread_t* thread_id;
+
+    unsigned int worker_thread_index;
+
+    struct list/*<Future>*/ local_deque;
+    pthread_mutex_t local_deque_lock;
+
+    bool currently_has_internal_submission; // if false: external submission
+
+    struct list_elem elem; // doubly linked list node to be able to add to
+                           // generic coded in list.c & list.h
+};
+
+struct thread_pool {
+    struct list/*<Future>*/ gs_queue;  
+    pthread_mutex_t gs_queue_lock;      
+    pthread_cond_t gs_queue_has_tasks;  /* i.e., global queue not empty */
+    // TODO: ask TA about conditional variables needed
+
+	struct list/*<Worker>*/ worker_list; // TODO: make into array
+	struct list/*<Future>*/ future_list;
+	pthread_mutex_t future_list_lock;
+
+	bool shutdown_requested;                                        
 };
 
 /**
@@ -110,14 +121,19 @@ struct thread_pool * thread_pool_new(int nthreads)
 
     pool->shutdown_requested = false;
 
+    // to be passed as a parameter to worker_function()
+    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) malloc(sizeof(struct thread_pool_and_current_worker));
+    pool_and_worker->pool = pool;
+
     // Iterate through the list of workers and create their threads.
 	struct list_elem* e;
 	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
          e = list_next(e)) {
 
         struct worker* current_worker = list_entry(e, struct worker, elem);
+    	pool_and_worker->worker = current_worker;
 
-        if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, (void *) pool) != 0) { 
+        if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker) != 0) { 
         	print_error_and_exit("pthread_create() error\n"); 
         }
     }
@@ -150,7 +166,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->task_fp = task;
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
-    // TODO: p_future->semaphore = ???
+    if (sem_init(&p_future->semaphore, 0, 0) < 0) { print_error_and_exit("sem_init() error"); }
 
     // if this thread is not a worker, add future to global queue 
     if (!is_worker) {
@@ -199,98 +215,61 @@ struct future * thread_pool_submit(struct thread_pool *pool,
  */
 void * future_get(struct future *f) 
 {
-    if (f == NULL) {
-        print_error_and_exit("future_get() called with NULL parameter");
-        
-    }
-
-    if (is_worker) {
-    	// TODO:
- 		return NULL;
-    } else {
-    	// TODO:
-    	return NULL;
-    }
+    if (f == NULL) { print_error_and_exit("future_get() called with NULL parameter"); }
+    sem_wait(&f->semaphore);
+    return f->result;
 }
 
 void future_free(struct future *f) 
 {
     if (f == NULL) { print_error_and_exit("future_free() called with NULL parameter"); }
-
-    // ...
+    free(f);
 }
 
 /**
  * This is the logic for how a worker thread decides to execute a 
  * task.
  */
-static void * worker_function(struct thread_pool *pool) 
+static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker) 
 {
 	is_worker = true;
 	
 	while(true) {
+		// acquire local deque lock
+		// 1) execute future in local deque
+
+		// pop_off_future_list
+		// future = pop_off_local_deque
+
+		// future->result
+
+		// 2) execute future at top of gs_queue
 
 
-
+		//future->task_fp
+		//sem_post(&future->semaphore);
 	}
 	
-    //struct worker *worker;      // the worker that has this thread as a member...
-    /* data should be the worker executing this thread */
-
-    //worker = (struct worker *) data; /* typecast arg */
-
-
-    /* ADD task to local_deque */
-    
-    /* where are the tasks taken from gs_queue added to local deque? 
-    (1) worker inits its local_deque_lock (moved to worker_init())
-        worker locks its local_deque  
-
-        execute tasks in own deque.
-        internal submissions added to top of deque (list_push_front)
-        thread executes them in LIFO [stack] order. 
-        [continue to (2) if completed (1)]
-    (2) Check the gs_queue
-            [must acquire gs_queue_lock mutex to check size]
-            while (gs_queue.size != 0):
-                dequeue [list_pop_back()] from gs_queue
-                release gs_queue_lock
-                add dequeued task to local_deque
-                execute task
-            [no more tasks in global q]    
-            DO NOT CALL pthread_cond_wait() yet! Must do (3), then 
-    (3) Try to steal from ** BOTTOM ** of other worker's dequeue's [list_pop_back]
-                // need to read leapfrog paper make sure...but what spec says
-
-    (4) acquire lock for gs_queue
-        pthread_cond_wait( worker's cond var for gs queue )
-        ...when it awakens due to broadcast being called, it will have reacquired the 
-        gsqueue lock.
-    */
     return NULL;
 }
 
-/* Initialize the worker struct
- * Arguments:
- *    worker - pointer to memory allocated for this struct
- *    worker_number - the index of the worker in the thread_pool's (( array? list? ))
- * Return: pointer to the initialized worker struct
+/**
+ * Initialize the worker struct
+ * @param worker = pointer to memory allocated for this struct
+ * @param worker_thread_index = the index of the worker in the thread_pool's worker_list
+ * @return pointer to the initialized worker struct
  */
-static struct worker * worker_init(struct worker * worker, unsigned int worker_number) 
+static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index) 
 {
     // malloc the worker's thread
     pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
     if (ptr_thread == NULL) { print_error_and_exit("malloc error\n"); }
     worker->thread_id = ptr_thread;
 
-    // initialize the worker's deque
-    list_init(&worker->local_deque); // ...its local_deque
+    worker->worker_thread_index = worker_thread_index;
 
-    // lock for the worker's deque
+    list_init(&worker->local_deque); 
     if (pthread_mutex_init(&worker->local_deque_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init()\n"); }
-
-    // the index of the worker in the thread pool's array [list?]
-    worker->worker_thread_idx = worker_number;
 
     worker->currently_has_internal_submission = false; 
     return worker;

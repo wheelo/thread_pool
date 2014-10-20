@@ -10,6 +10,7 @@
 #include <stdio.h> // printf()
 #include <stdlib.h> // malloc()
 #include <pthread.h> // pthread_create()
+#include <semaphore.h> // sem_wait() sem_post()
 #include "list.h"
 #include "threadpool_lib.h"  /* print_error_and_exit() */
 
