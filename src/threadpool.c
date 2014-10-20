@@ -75,7 +75,7 @@ struct future {
     
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
-    threadpool *p_pool;  
+    struct thread_pool *p_pool;  
 
     // TODO: TA question = How to steal future from another worker if you don't
     //                     wont to take bottom external
@@ -250,14 +250,17 @@ void * future_get(struct future *f)
         // and the first future generated 2 other futures then the 1 thread
         // would execute 1 of the 2 generated futures and then deadlock.
         else if (f->status == NOT_STARTED) {
-            void *result = (*(future->task_fp))(f->p_pool, future->param_for_task_fp);
+            
+            void *result = (*(f->task_fp))(f->p_pool, f->param_for_task_fp);
 
             // lock
-            future->result = result;
-            future->status = COMPLETED;
-            sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            f->result = result;
+            f->status = COMPLETED;
+            sem_post(&f->semaphore); // increment_and_wake_a_waiting_thread_if_any()
             // unlock
+            return f->result;
         }
+        return f->result;
     } else { 
         // thread executing this is not a worker thread so it is safe to 
         // sem_wait()
