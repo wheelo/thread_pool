@@ -71,7 +71,7 @@ struct thread_pool {
     // TODO: ask TA about conditional variables needed
 
 	struct list/*<Worker>*/ worker_list; // TODO: make into array
-
+    // maybe futures_list?
 	bool shutdown_requested;                                        
 };
 
@@ -216,6 +216,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 void * future_get(struct future *f) 
 {
     if (f == NULL) { print_error_and_exit("future_get() called with NULL parameter"); }
+    // error 
     sem_wait(&f->semaphore);
     return f->result;
 }
@@ -239,7 +240,9 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 	while(true) {
 		// if there are futures in local deque execute them first
 		if(!list_empty(&worker->local_deque)) {
-			pthread_mutex_lock(&worker->local_deque_lock);
+			
+            // TODO: check errors
+            pthread_mutex_lock(&worker->local_deque_lock);
 			// "Workers execute tasks by removing them from the top" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
@@ -248,8 +251,6 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 		} // else if there are futures in gs_queue execute them second 
 		else if (!list_empty(&pool->gs_queue)) {
 			pthread_mutex_lock(&pool->gs_queue_lock);
-			// "If a worker runs out of tasks, it checks a global submission queue
-			//  for tasks" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
 			pthread_mutex_unlock(&pool->gs_queue_lock);
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
