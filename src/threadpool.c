@@ -32,23 +32,16 @@ struct future {
     fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
     void* result;
+    sem_t semaphore; // for if result is finished computing
 	
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
     // TODO: TA question = How to steal future from another worker if you don't
     //                     wont to take bottom external
     bool is_internal_task; // if thread_pool_submit() called by a worker thread
-    // TODO: semaphore for what?
-    sem_t semaphore;
-	
-    // ========================= FOR LEAPFROGGING ==============================
-    // int idx_in_local_deque;    // call list_size()
-	// int depth; // see the leap frogging paper
-	// =========================================================================
 
     bool future_get_called; // if false don't call future_free() 
     struct list_elem gs_queue_elem; 
-    struct list_elem future_list_elem;
     struct list_elem deque_elem;
 };
 
@@ -77,8 +70,6 @@ struct thread_pool {
     // TODO: ask TA about conditional variables needed
 
 	struct list/*<Worker>*/ worker_list; // TODO: make into array
-	struct list/*<Future>*/ future_list;
-	pthread_mutex_t future_list_lock;
 
 	bool shutdown_requested;                                        
 };
@@ -106,7 +97,6 @@ struct thread_pool * thread_pool_new(int nthreads)
     if (pthread_cond_init(&pool->gs_queue_has_tasks, NULL) != 0) { print_error_and_exit("pthread_cond_init() error\n"); }
 
     list_init(&pool->worker_list);
-    list_init(&pool->future_list);
 
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
 
@@ -121,16 +111,17 @@ struct thread_pool * thread_pool_new(int nthreads)
 
     pool->shutdown_requested = false;
 
-    // to be passed as a parameter to worker_function()
-    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) malloc(sizeof(struct thread_pool_and_current_worker));
-    pool_and_worker->pool = pool;
-
     // Iterate through the list of workers and create their threads.
 	struct list_elem* e;
 	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
          e = list_next(e)) {
 
         struct worker* current_worker = list_entry(e, struct worker, elem);
+
+        // to be passed as a parameter to worker_function()
+    	struct thread_pool_and_current_worker *pool_and_worker = 
+    	        (struct thread_pool_and_current_worker*) malloc(sizeof(struct thread_pool_and_current_worker));
+    	pool_and_worker->pool = pool;
     	pool_and_worker->worker = current_worker;
 
         if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker) != 0) { 
@@ -182,11 +173,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 	    /* release mutex lock */
 	    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }
 	} 
-    else { /* is a worker thread */
-        // add to the future list
-        if (pthread_mutex_lock(&pool->future_list_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
-        list_push_back(&pool->future_list, &p_future->future_list_elem);
-        if (pthread_mutex_unlock(&pool->future_list_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }        
+    else { /* is a worker thread */        
 
         // add to the top of local_deque of the worker thread calling the thread_pool_submit()
         pthread_t this_thread_id = pthread_self();
@@ -232,13 +219,20 @@ void future_free(struct future *f)
  */
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker) 
 {
-	is_worker = true;
+	is_worker = true; // = thread local variable
+	//struct thread_pool *pool = pool_and_worker->pool;
+	//struct worker *worker = pool_and_worker->worker;
 
 	while(true) {
+		// if there are futures in local deque execute them first
+		if(!list_empty(&worker->local_deque)) {
+			// "Workers execute tasks by removing them from the top" from 2.1 of spec
+			//struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
+		}
+
 		// acquire local deque lock
 		// 1) execute future in local deque
 
-		// pop_off_future_list
 		// future = pop_off_local_deque
 
 		// future->result
