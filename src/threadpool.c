@@ -23,43 +23,6 @@ static void worker_free(struct worker *worker);
  */
 __thread bool is_worker; 
 
-struct thread_pool {
-    struct list/*<Future>*/ gs_queue;  
-    pthread_mutex_t gs_queue_lock;      
-    pthread_cond_t gs_queue_has_tasks;  
-    // TODO: ask TA about conditional variables needed
-
-    bool future_get_called; // if false don't call future_free() 
-    struct list_elem gs_queue_elem; 
-    struct list_elem deque_elem;
-
-    // for leapfrogging
-    int worker_id; // index of the worker that is evaluating the future, if any
-    int creator_id; // index of the worker in whose work deque the future
-                    // was placed when it was created.
-
-    struct list/*<Worker>*/ worker_list; // TODO: make into array
-    // maybe futures_list?
-    bool shutdown_requested;                      
-};
-
-/**
- * A 'worker' consists of both the thread, the local deque of futures, and other
- * associated data 
- */
-struct worker {
-    pthread_t* thread_id;
-
-    unsigned int worker_thread_index;
-
-    struct list/*<Future>*/ local_deque;
-    pthread_mutex_t local_deque_lock;
-
-    bool currently_has_internal_submission; // if false: external submission
-
-    struct list_elem elem; // doubly linked list node to be able to add to
-                           // generic coded in list.c & list.h
-};
 
 /**
  * From 2.4 Basic Strategy
@@ -87,6 +50,44 @@ struct future {
 };
 
 /**
+ * A 'worker' consists of both the thread, the local deque of futures, and other
+ * associated data 
+ */
+struct worker {
+    pthread_t* thread_id;
+
+    unsigned int worker_thread_index;
+
+    struct list/*<Future>*/ local_deque;
+    pthread_mutex_t local_deque_lock;
+
+    bool currently_has_internal_submission; // if false: external submission
+
+    struct list_elem elem; // doubly linked list node to be able to add to
+                           // generic coded in list.c & list.h
+};
+
+struct thread_pool {
+    struct list/*<Future>*/ gs_queue;  
+    pthread_mutex_t gs_queue_lock;      
+    pthread_cond_t gs_queue_has_tasks;  
+    // TODO: ask TA about conditional variables needed
+
+    bool future_get_called; // if false don't call future_free() 
+    struct list_elem gs_queue_elem; 
+    struct list_elem deque_elem;
+
+    // for leapfrogging
+    int worker_id; // index of the worker that is evaluating the future, if any
+    int creator_id; // index of the worker in whose work deque the future
+                    // was placed when it was created.
+
+    struct list/*<Worker>*/ worker_list;
+    bool shutdown_requested;                      
+    struct worker *workers;
+};
+
+/**
  * @param nthreads = number of threads to create
  */
 struct thread_pool * thread_pool_new(int nthreads) 
@@ -107,14 +108,17 @@ struct thread_pool * thread_pool_new(int nthreads)
     if (pthread_cond_init(&pool->gs_queue_has_tasks, NULL) != 0) { print_error_and_exit("pthread_cond_init() error\n"); }
 
     list_init(&pool->worker_list);
+    pool->workers = (struct worker *) malloc(nthreads * sizeof(struct worker)); 
 
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
 
     // Initialize all workers and add to threadpool worker list
 	int i;
 	for (i = 0; i < nthreads; ++i) {
-		struct worker *worker = (struct worker *) malloc(sizeof(struct worker));        
-        worker = worker_init(worker, i); 
+		//struct worker *worker = (struct worker *) malloc(sizeof(struct worker));        
+        //worker = worker_init(worker, i); 
+        (pool->workers + i) = (struct worker *) malloc(sizeof(struct worker));
+        pool->workers[i] = *(worker_init(&pool->workers[i], i));
 
         list_push_back(&pool->worker_list, &worker->elem);
 	}
@@ -198,6 +202,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
     if (sem_init(&p_future->semaphore, 0, 0) < 0) { print_error_and_exit("sem_init() error"); }
+/*    if (pthread_mutex_lock(&p_future->lock)
+*/
 
     // if this thread is not a worker, add future to global queue 
     if (!is_worker) {
