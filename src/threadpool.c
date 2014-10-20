@@ -14,6 +14,9 @@ struct thread_pool_and_current_worker {
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
 static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index);
 
+
+
+
 /**
  * Each thread has this local variable. Even though it is declared like a 
  * global variable it is NOT. 
@@ -28,8 +31,8 @@ __thread bool is_worker;
  * to that function, as well as the result(when available).
  */
 struct future {
-    void* param_for_task_fp; 
     fork_join_task_t task_fp; // pointer to the function to be executed by worker
+    void* param_for_task_fp; 
 
     void* result;
     sem_t semaphore; // for if result is finished computing
@@ -37,7 +40,7 @@ struct future {
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
     // TODO: TA question = How to steal future from another worker if you don't
-    //                     wont to take bottom external
+    //                     want to take bottom external
     bool is_internal_task; // if thread_pool_submit() called by a worker thread
 
     bool future_get_called; // if false don't call future_free() 
@@ -83,13 +86,11 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 	is_worker = false;
 
-    // Initialize the thread pool
+    /* Initialize the thread pool */
 	struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
 	if (pool == NULL) { print_error_and_exit("malloc() error\n"); } 
 
-    list_init(&pool->gs_queue);
-    
-    // Initialize mutex for the global submission queue
+    list_init(&pool->gs_queue);    
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
 
     // Initialize condition variable used to broadcast to worker threads that
@@ -134,16 +135,14 @@ struct thread_pool * thread_pool_new(int nthreads)
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
 	if (pool == NULL) { print_error_and_exit("hread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
-
-    // broadcast - wake up threads asleep
-
+    if (pool->shutdown_requested == true) { return; } // if already called thread_pool_shutdown_and_destroy()
+    // broadcast - wake up any sleeping threads prior to exiting
+    if (pthread_cond_broadcast(&gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast()\n"); }
 
 	// call pthread_join() on threads to wait for them to finish and reap
 	// their resources
 	// DON'T use pthread_cancel()
-	if (pool->shutdown_requested == true) {
-		return; // if already called thread_pool_shutdown_and_destroy()
-	}
+
 	pool->shutdown_requested = true;
 
 	struct list_elem *e;
@@ -175,14 +174,9 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     if (!is_worker) {
     	// Acquire lock for the global submission queue 
     	if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
-	
-	    // add external future to global queue (critical section) 
 	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
-
 	    /* Broadcast to sleeping threads that work is available (in queue) */
 	    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast() error\n"); }
-
-	    /* release mutex lock */
 	    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }
 	} 
     else { /* is a worker thread */        
@@ -199,8 +193,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
             if (*current_worker->thread_id == this_thread_id) {
                 if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
-                // add internal future to the worker thread's local dequeue
-                list_push_front(&current_worker->local_deque, &p_future->deque_elem);       
+                list_push_front(&current_worker->local_deque, &p_future->deque_elem);  // internal submissions (futures) added to local deque
                 if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }                            
             }
         }
@@ -235,9 +228,9 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
 
-	while(true) {
+	while (true) {
 		// if there are futures in local deque execute them first
-		if(!list_empty(&worker->local_deque)) {
+		if (!list_empty(&worker->local_deque)) {
 			pthread_mutex_lock(&worker->local_deque_lock);
 			// "Workers execute tasks by removing them from the top" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
@@ -259,6 +252,10 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 		//  bottom of other threads' queues"
 	}
 	
+    /** Reminder: call pthread_cond_wait at end to sleep (?)
+        talk to TA, decide on logic 
+        also, must call it from within a while loop (why?) **/
+
     return NULL;
 }
 
@@ -283,3 +280,4 @@ static struct worker * worker_init(struct worker * worker, unsigned int worker_t
     worker->currently_has_internal_submission = false; 
     return worker;
 }
+
