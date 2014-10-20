@@ -82,8 +82,8 @@ struct thread_pool {
     int creator_id; // index of the worker in whose work deque the future
                     // was placed when it was created.
 
-    struct list/*<Worker>*/ worker_list;
-    bool shutdown_requested;                      
+    bool shutdown_requested;     
+    unsigned int num_workers;                 
     struct worker *workers;
 };
 
@@ -107,39 +107,34 @@ struct thread_pool * thread_pool_new(int nthreads)
     // tasks are available in the global submission queue 
     if (pthread_cond_init(&pool->gs_queue_has_tasks, NULL) != 0) { print_error_and_exit("pthread_cond_init() error\n"); }
 
-    list_init(&pool->worker_list);
     pool->workers = (struct worker *) malloc(nthreads * sizeof(struct worker)); 
 
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
 
+    pool->num_workers = nthreads;
+
     // Initialize all workers and add to threadpool worker list
 	int i;
-	for (i = 0; i < nthreads; ++i) {
-		//struct worker *worker = (struct worker *) malloc(sizeof(struct worker));        
-        //worker = worker_init(worker, i); 
-        (pool->workers + i) = (struct worker *) malloc(sizeof(struct worker));
+	for (i = 0; i < nthreads; ++i) { 
+        pool->workers[i] = *((struct worker *) malloc(sizeof(struct worker)));
         pool->workers[i] = *(worker_init(&pool->workers[i], i));
-
-        list_push_back(&pool->worker_list, &worker->elem);
 	}
 
     pool->shutdown_requested = false;
 
     // Iterate through the list of workers and create their threads.
-	struct list_elem* e;
-	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
-         e = list_next(e)) {
-
-        struct worker* current_worker = list_entry(e, struct worker, elem);
+    for (i = 0; i < nthreads; i++) {
+        struct worker* current_worker = pool->workers + i;
 
         // to be passed as a parameter to worker_function()
-    	struct thread_pool_and_current_worker *pool_and_worker = 
-    	        (struct thread_pool_and_current_worker*) malloc(sizeof(struct thread_pool_and_current_worker));
-    	pool_and_worker->pool = pool;
-    	pool_and_worker->worker = current_worker;
+        struct thread_pool_and_current_worker *pool_and_worker = 
+                (struct thread_pool_and_current_worker*) malloc(sizeof(struct thread_pool_and_current_worker));
+        pool_and_worker->pool = pool;
+        pool_and_worker->worker = current_worker;
+
 
         if (pthread_create(current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker) != 0) { 
-        	print_error_and_exit("pthread_create() error\n"); 
+            print_error_and_exit("pthread_create() error\n"); 
         }
     }
 	return pool;
@@ -175,10 +170,10 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 	// DON'T use pthread_cancel()
 
 	pool->shutdown_requested = true;
-
-	struct list_elem *e;
-	for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list); e = list_next(e)) {
-		struct worker *worker = list_entry(e, struct worker, elem);
+	
+    int i = 0;
+    for (; i < pool->num_workers; ++i) {
+		struct worker *worker = pool->workers + i;
 		pthread_join(*worker->thread_id, NULL);
 
         worker_free(worker);
@@ -218,19 +213,19 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
         // add to the top of local_deque of the worker thread calling the thread_pool_submit()
         pthread_t this_thread_id = pthread_self();
-        // loop through pool's worker_list to find the worker struct with this thread's tid
+        
+        // loop through pool's array of workers to find the worker struct with this thread's tid
+        int i = 0;
+        for (; i < pool->num_workers; i++) {
 
-        struct list_elem* e;
-        for (e = list_begin(&pool->worker_list); e != list_end(&pool->worker_list);
-            e = list_next(e)) {
-
-            struct worker* current_worker = list_entry(e, struct worker, elem);
+            struct worker* current_worker = pool->workers + i;
 
             if (*current_worker->thread_id == this_thread_id) {
                 if (pthread_mutex_lock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_lock() error\n"); }
                 list_push_front(&current_worker->local_deque, &p_future->deque_elem);  // internal submissions (futures) added to local deque
                 if (pthread_mutex_unlock(&current_worker->local_deque_lock) != 0) { print_error_and_exit("pthread_mutex_unlock() error\n"); }                            
             }
+        
         }
 	}
 	return p_future;
@@ -339,7 +334,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 /**
  * Initialize the worker struct
  * @param worker = pointer to memory allocated for this struct
- * @param worker_thread_index = the index of the worker in the thread_pool's worker_list
+ * @param worker_thread_index = the index of the worker in the thread_pool's workers array
  * @return pointer to the initialized worker struct
  */
 static struct worker * worker_init(struct worker *worker, unsigned int worker_thread_index) 
