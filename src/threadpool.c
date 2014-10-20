@@ -233,7 +233,7 @@ void future_free(struct future *f)
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker) 
 {
 	is_worker = true;
-	
+
 	while(true) {
 		// acquire local deque lock
 		// 1) execute future in local deque

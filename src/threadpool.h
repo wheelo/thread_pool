@@ -76,9 +76,9 @@ void future_free(struct future *f);
 
 // Replace with bool is_done ? remove if so. Ever in NOT_STARTED?
 typedef enum FutureStatus_ {
-  NOT_STARTED,
-  IN_PROGRESS,
-  COMPLETED
+    NOT_STARTED,
+    IN_PROGRESS,
+    COMPLETED
 } FutureStatus;
 
 #endif
