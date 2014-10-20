@@ -150,7 +150,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 	if (pool == NULL) { print_error_and_exit("hread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
     if (pool->shutdown_requested == true) { return; } // if already called thread_pool_shutdown_and_destroy()
     // broadcast - wake up any sleeping threads prior to exiting
-    if (pthread_cond_broadcast(&gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast()\n"); }
+    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast()\n"); }
 
     /* NOTES: 
 
