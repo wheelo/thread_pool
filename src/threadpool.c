@@ -24,27 +24,16 @@ static void worker_free(struct worker *worker);
  */
 __thread bool is_worker; 
 
-/**
- * From 2.4 Basic Strategy
- * Should store a pointer to the function to be called, any data to be passed
- * to that function, as well as the result(when available).
- */
-struct future {
-    void* param_for_task_fp; 
-    fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
-    void* result;
-    sem_t semaphore; // for if result is finished computing
-	
-    FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
+struct thread_pool {
+    struct list/*<Future>*/ gs_queue;  
+    pthread_mutex_t gs_queue_lock;      
+    pthread_cond_t gs_queue_has_tasks;  
+    // TODO: ask TA about conditional variables needed
 
-    // TODO: TA question = How to steal future from another worker if you don't
-    //                     wont to take bottom external
-    bool is_internal_task; // if thread_pool_submit() called by a worker thread
-
-    bool future_get_called; // if false don't call future_free() 
-    struct list_elem gs_queue_elem; 
-    struct list_elem deque_elem;
+    struct list/*<Worker>*/ worker_list; // TODO: make into array
+    // maybe futures_list?
+    bool shutdown_requested;                                        
 };
 
 /**
@@ -65,16 +54,29 @@ struct worker {
                            // generic coded in list.c & list.h
 };
 
-struct thread_pool {
-    struct list/*<Future>*/ gs_queue;  
-    pthread_mutex_t gs_queue_lock;      
-    pthread_cond_t gs_queue_has_tasks;  
-    // TODO: ask TA about conditional variables needed
+/**
+ * From 2.4 Basic Strategy
+ * Should store a pointer to the function to be called, any data to be passed
+ * to that function, as well as the result(when available).
+ */
+struct future {
+    void* param_for_task_fp; 
+    fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
-	struct list/*<Worker>*/ worker_list; // TODO: make into array
-    // maybe futures_list?
-	bool shutdown_requested;                                        
+    void* result;
+    sem_t semaphore; // for if result is finished computing
+    
+    FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
+
+    // TODO: TA question = How to steal future from another worker if you don't
+    //                     wont to take bottom external
+    bool is_internal_task; // if thread_pool_submit() called by a worker thread
+
+    bool future_get_called; // if false don't call future_free() 
+    struct list_elem gs_queue_elem; 
+    struct list_elem deque_elem;
 };
+
 
 /**
  * @param nthreads = number of threads to create
