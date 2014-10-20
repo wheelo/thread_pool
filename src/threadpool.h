@@ -74,6 +74,8 @@ void future_free(struct future *f);
 
 /* Enums, Constants, etc. */
 
+// TODO:
+//
 // Replace with bool is_done ? remove if so. Ever in NOT_STARTED?
 typedef enum FutureStatus_ {
     NOT_STARTED,

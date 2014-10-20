@@ -10,9 +10,11 @@ struct thread_pool_and_current_worker {
 	struct worker *worker;
 };
 
+
 // private functions for this class that must be declared here to be called below
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
 static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index);
+static void worker_free(struct worker *worker);
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -75,7 +77,7 @@ struct thread_pool {
     // TODO: ask TA about conditional variables needed
 
 	struct list/*<Worker>*/ worker_list; // TODO: make into array
-
+    // maybe futures_list?
 	bool shutdown_requested;                                        
 };
 
@@ -138,17 +140,30 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
-	if (pool == NULL) { print_error_and_exit("hread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
+	if (pool == NULL) { print_error_and_exit("thread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
+    if (pool->shutdown_requested == true) { return; } // if already called thread_pool_shutdown_and_destroy() 
 
-    // broadcast - wake up threads asleep
+    /* NOTES: 
 
+        TODO: if shutdown called, just stop entire threadpool (ignore ) ???
+            No, probably have to finish all futures related to the current external submission (e.g., mergesort)
+        TODO: Spec 2.4 "The calling thread must join all worker threads before returning"
+        but...says not to use pthread_cancel b/c currently executing futures not guaranteed to complete.
+        i.e., all currently executing futures must be completed. And to evaluate the future result, all
+        tasks (futures) spawned from the original external submission must complete and be joined.
 
-	// call pthread_join() on threads to wait for them to finish and reap
-	// their resources
+        Currently there are no tests that have multiple external submissions. May not need to even consider
+        what to do if there are >= 2 external submissions and the first is being evaluated and there are
+        additional external submissions in the global queue. But if we have to, it seems reasonable to 
+        finish the currently executing one, and just cancel any submissions in the global queue. */
+
+    // Wake up any sleeping threads
+    if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) {
+        print_error_and_exit("pthread_cond_broadcast() error\n");
+    }
+
+	// call pthread_join() on threads to wait for them to finish and reap their resources
 	// DON'T use pthread_cancel()
-	if (pool->shutdown_requested == true) {
-		return; // if already called thread_pool_shutdown_and_destroy()
-	}
 	pool->shutdown_requested = true;
 
 	struct list_elem *e;
@@ -219,28 +234,33 @@ struct future * thread_pool_submit(struct thread_pool *pool,
  */
 void * future_get(struct future *f) 
 {
+    /* NOTE: Spec 2.4 - "The calling thread may have to help in completing the future being joined, as described
+       in section 2.2" */
     if (f == NULL) { print_error_and_exit("future_get() called with NULL parameter"); }
 
     if (is_worker) {
-        // below if statement is for when the threadpool has 1 thread and 
+        if (f->status == COMPLETED) {
+            return f->result;
+        }
+        // Below if statement is for when the threadpool has 1 thread and 
         // multiple futures. You cannot just simply call sem_wait() here
         // because if 1 worker thread calls sem_post() on the first future
         // and the first future generated 2 other futures then the 1 thread
-        // would execute of the 2 generated futures and then deadlock
-        if (f->status == NOT_STARTED) {
-            // since future has not started just execute it yourself
-
+        // would execute 1 of the 2 generated futures and then deadlock.
+        else if (f->status == NOT_STARTED) {
+            //future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+            future->status = COMPLETED;
+            sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
         }
-
+        return f->result;
     } else { 
         // thread executing this is not a worker thread so it is safe to 
         // sem_wait()
         sem_wait(&f->semaphore); // decrement_and_block_if_the_result_is_negative()
         // when the value is incremented by worker_function the result will be 
         // computed
+        return f->result;
     }
-
-    return f->result;
 }
 
 void future_free(struct future *f) 
@@ -262,21 +282,22 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 	while(true) {
 		// if there are futures in local deque execute them first
 		if(!list_empty(&worker->local_deque)) {
-			pthread_mutex_lock(&worker->local_deque_lock);
+			
+            // TODO: check errors
+            pthread_mutex_lock(&worker->local_deque_lock);
 			// "Workers execute tasks by removing them from the top" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
-            // TODO: do I need to lock?
+
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->status = COMPLETED;
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
 		} // else if there are futures in gs_queue execute them second 
 		else if (!list_empty(&pool->gs_queue)) {
 			pthread_mutex_lock(&pool->gs_queue_lock);
-			// "If a worker runs out of tasks, it checks a global submission queue
-			//  for tasks" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
 			pthread_mutex_unlock(&pool->gs_queue_lock);
+
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->status = COMPLETED;
 			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
@@ -295,7 +316,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
  * @param worker_thread_index = the index of the worker in the thread_pool's worker_list
  * @return pointer to the initialized worker struct
  */
-static struct worker * worker_init(struct worker * worker, unsigned int worker_thread_index) 
+static struct worker * worker_init(struct worker *worker, unsigned int worker_thread_index) 
 {
     // malloc the worker's thread
     pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
@@ -309,4 +330,17 @@ static struct worker * worker_init(struct worker * worker, unsigned int worker_t
 
     worker->currently_has_internal_submission = false; 
     return worker;
+}
+
+/**
+ * Free all memory allocated to the worker struct.
+ * @param worker = pointer to the worker to free
+ * @return Return 0 if successful, or 1 if error
+ */
+static void worker_free(struct worker *worker)
+{
+    if (worker == NULL) { print_error_and_exit("worker_free(): passed NULL arg\n"); }
+    //free(worker->local_deque);
+    if (pthread_mutex_destroy(&worker->local_deque_lock) != 0) {  print_error_and_exit("pthread_mutex_destroy\n"); }
+    free(worker);
 }
