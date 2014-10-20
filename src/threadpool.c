@@ -220,28 +220,30 @@ void future_free(struct future *f)
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker) 
 {
 	is_worker = true; // = thread local variable
-	//struct thread_pool *pool = pool_and_worker->pool;
-	//struct worker *worker = pool_and_worker->worker;
+	struct thread_pool *pool = pool_and_worker->pool;
+	struct worker *worker = pool_and_worker->worker;
 
 	while(true) {
 		// if there are futures in local deque execute them first
 		if(!list_empty(&worker->local_deque)) {
+			pthread_mutex_lock(&worker->local_deque_lock);
 			// "Workers execute tasks by removing them from the top" from 2.1 of spec
-			//struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
-		}
-
-		// acquire local deque lock
-		// 1) execute future in local deque
-
-		// future = pop_off_local_deque
-
-		// future->result
-
-		// 2) execute future at top of gs_queue
-
-
-		//future->task_fp
-		//sem_post(&future->semaphore);
+			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
+			pthread_mutex_unlock(&worker->local_deque_lock);
+			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+		} // else if there are futures in gs_queue execute them second 
+		else if (!list_empty(&pool->gs_queue)) {
+			pthread_mutex_lock(&pool->gs_queue_lock);
+			// "If a worker runs out of tasks, it checks a global submission queue
+			//  for tasks" from 2.1 of spec
+			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
+			pthread_mutex_unlock(&pool->gs_queue_lock);
+			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
+			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+		} // TODO: else work stealing...
+		// "Otherwise, the worker attempts to steal tasks to work on from the
+		//  bottom of other threads' queues"
 	}
 	
     return NULL;
