@@ -9,9 +9,6 @@
 
 
 
-#define ERR     2
-
-
 // http://www.guyrutenberg.com/2007/09/22/profiling-code-using-clock_gettime/
 struct timespec timespec_diff(struct timespec start, struct timespec end)
 {
@@ -53,11 +50,6 @@ void timespec_print(struct timespec ts, char *buf, size_t buflen)
     abort();
 }
 
-void print_error_and_exit(char* error_message) 
-{
-    write(ERR, error_message, strlen(error_message));
-    exit(EXIT_FAILURE);
-}
 
 
 /***************************************************************************
@@ -69,12 +61,27 @@ void print_error_and_exit(char* error_message)
  *   - Not all pthread or semaphore functions included
  ***************************************************************************/
 
+/*
 
-void print_error_and_exit(char *fn_name, int err_code)
+void print_error_and_exit(char* error_message) 
 {
-    fprintf(stderr, "%s(): returned error code: %s\n", fn_name, strerror(err_code));
+    write(stderr, error_message, strlen(error_message));
     exit(EXIT_FAILURE);
 }
+*/
+
+void error_exit(char *msg, int err_code)
+{
+    fprintf(stderr, "%s: returned error code: %s\n", msg, strerror(err_code));
+    exit(EXIT_FAILURE);
+}
+
+void exception_exit(char *msg)
+{
+    fprintf(stderr, "%s\n", msg);
+    exit(EXIT_FAILURE);
+}
+
 
 /* malloc */
  void * malloc_c(int size)
@@ -240,7 +247,6 @@ void sem_post_c(sem_t *sem)
         print_error_and_exit("sem_post", rc);
     }
 }
-
 
 void sem_wait_c(sem_t *sem)
 {
