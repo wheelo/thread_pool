@@ -29,11 +29,10 @@ static void worker_free(struct worker *worker);
  */
 __thread bool is_worker; 
 
-
 /**
- * From 2.4 Basic Strategy
- * Should store a pointer to the function to be called, any data to be passed
- * to that function, as well as the result(when available).
+ * Represents a task that needs to be done. Contains fields need to execute
+ * this future and move it around within the global queue and each worker
+ * threads local deque and store it's result.
  */
 struct future {
     void *param_for_task_fp; 
@@ -45,23 +44,15 @@ struct future {
 
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
-    struct thread_pool *p_pool;  
+    struct thread_pool *p_pool; // must be passed as an parameter in future_get()
+                                // to be able to execute future->task_fp 
 
-    // TODO: TA question = How to steal future from another worker if you don't
-    //                     wont to take bottom external
-    bool is_internal_task; // if thread_pool_submit() called by a worker thread
-
-    bool future_get_called; // if false don't call future_free() 
-    struct list_elem gs_queue_elem; 
-    struct list_elem deque_elem;
+    struct list_elem gs_queue_elem; // for adding to gs_queue
+    struct list_elem deque_elem; // for adding to local deque of each worker
 };
 
-/**
- * A 'worker' consists of both the thread, the local deque of futures, and other
- * associated data 
- */
 struct worker {
-    pthread_t* thread_id;
+    pthread_t* thread_id; // pointer to actual thread
 
     unsigned int worker_idx;
 
@@ -70,8 +61,7 @@ struct worker {
 
     bool currently_has_internal_submission; // if false: external submission
 
-    struct list_elem elem; // doubly linked list node to be able to add to
-                           // generic coded in list.c & list.h
+    struct list_elem elem; 
 };
 
 struct thread_pool {
@@ -80,7 +70,6 @@ struct thread_pool {
     pthread_cond_t gs_queue_has_tasks;  
     // TODO: ask TA about conditional variables needed
 
-    bool future_get_called; // if false don't call future_free() 
     struct list_elem gs_queue_elem; 
     struct list_elem deque_elem;
 

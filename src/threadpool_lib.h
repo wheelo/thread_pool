@@ -2,7 +2,6 @@
 #include <unistd.h> // write()
 #include <string.h> // strlen()
 
-
 struct timespec timespec_diff(struct timespec start, struct timespec end);
 void timespec_print(struct timespec ts, char *buf, size_t buflen);
 int count_number_of_threads(void);
@@ -14,7 +13,7 @@ void exception_exit(char *msg);
 /* Wrapper functions with error checking for pthreads and semaphores */
 
 /* malloc */
- void * malloc_c(int size);
+void * malloc_c(int size);
 
 /* POSIX Threads (pthread.h) */
 // Thread Routines
