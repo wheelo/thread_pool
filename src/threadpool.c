@@ -64,7 +64,7 @@ struct future {
 };
 
 struct worker {
-    pthread_t* thread_id; // pointer to actual thread
+    pthread_t thread_id;
 
     unsigned int index_of_worker;
 
@@ -124,7 +124,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     	pool_and_worker->pool = pool;
     	pool_and_worker->worker = current_worker;
 
-        pthread_create(current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker);
+        pthread_create(&current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker);
     }
 	return pool;
 }
@@ -150,7 +150,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     for (i = 0; i < pool->number_of_workers; i++) {
 		//struct worker *worker = list_entry(e, struct worker, elem);
         struct worker *current_worker = pool->workers + i;
-		pthread_join(*current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
+		pthread_join(current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
                                                             // stored in the location referenced by value_ptr.
         worker_free(current_worker);
 	}
@@ -194,7 +194,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
         int i;
         for (i = 0; i < pool->number_of_workers; i++) {
             struct worker *current_worker = pool->workers + i;
-            if (*current_worker->thread_id == this_thread_id) {
+            if (current_worker->thread_id == this_thread_id) {
                 pthread_mutex_lock(&current_worker->local_deque_lock);
                 // internal submissions (futures) added to top of local deque                
                 list_push_front(&current_worker->local_deque, &p_future->deque_elem);
@@ -337,8 +337,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
  */
 static struct worker * worker_init(struct worker *worker, unsigned int index_of_worker) 
 {
-    pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
-    worker->thread_id = ptr_thread;
+    //worker->thread_id = will be set when pthread_create() is called
     worker->index_of_worker = index_of_worker;
     list_init(&worker->local_deque); 
     pthread_mutex_init(&worker->local_deque_lock, NULL);
