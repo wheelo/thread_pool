@@ -33,7 +33,7 @@ static void exception_exit(char *string);
  * NOTE: remember that there is already 1 thread running the main code besides
  *       the worker threads you create in thread_pool_new().
  */
-__thread bool is_worker; 
+static __thread bool is_worker; 
 
 typedef enum FutureStatus_ {
     NOT_STARTED,
