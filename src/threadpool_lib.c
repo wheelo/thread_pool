@@ -64,7 +64,9 @@ void print_error_and_exit(char* error_message)
  * Wrapper functions for malloc, pthread.h, and semaphore.h
  *   - These make code more readable by moving the original function and 
  *     checking of the return value for errors.
- *   - All wrapped functions have the same parameters as the original
+ *   - All wrapped functions have the same parameters as the original and
+ *     same name with _c appended to the end (for 'checked')
+ *   - Not all pthread or semaphore functions included
  ***************************************************************************/
 
 
@@ -75,7 +77,7 @@ void print_error_and_exit(char *fn_name, int err_code)
 }
 
 /* malloc */
- void * checked_malloc(int size)
+ void * malloc_c(int size)
  {
     void *p = malloc(size);
     if (p == NULL) {
@@ -98,10 +100,6 @@ void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr,
     }
 }
 
-//int pthread_detach(pthread_t thread)
-//int pthread_equal(pthread_t t1, pthread_t t2)
-//void pthread_exit(void *value_ptr)
-
 void pthread_join_c(pthread_t thread, void **value_ptr)
 {
     int rc;
@@ -112,8 +110,6 @@ void pthread_join_c(pthread_t thread, void **value_ptr)
 }
 
 //int pthread_cancel(pthread_t thread)
-//int pthread_once(pthread_once_t *once_control, void
-//    (*init_routine)(void))
 
 pthread_t pthread_self_c(void)
 {
@@ -121,14 +117,7 @@ pthread_t pthread_self_c(void)
     return pthread_self(void);
 }
 
-//int pthread_atfork(void (*prepare)(void), void (*parent)(void), void
-//    (*child)(void))
-
-
 // Mutex Routines
-
-//int pthread_mutexattr_destroy(pthread_mutexattr_t *attr)
-//int pthread_mutexattr_init(pthread_mutexattr_t *attr)
 void pthread_mutex_destroy_c(pthread_mutex_t *mutex)
 {
     int rc;
@@ -167,10 +156,6 @@ void pthread_mutex_unlock_c(pthread_mutex_t *mutex)
 }
 
 // Condition Variable Routines
-//void pthread_condattr_init(pthread_condattr_t *attr)
-//int pthread_condattr_destroy(pthread_condattr_t *attr)
-
-
 void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr)
 {
     int rc;
@@ -179,6 +164,7 @@ void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr)
         print_error_and_exit("pthread_cond_init", rc);
     }
 }
+
 void pthread_cond_destroy_c(pthread_cond_t *cond)
 {
     int rc;
@@ -187,7 +173,6 @@ void pthread_cond_destroy_c(pthread_cond_t *cond)
         print_error_and_exit("pthread_cond_destroy", rc);
     }
 }
-
 
 void pthread_cond_signal_c(pthread_cond_t *cond)
 {
@@ -228,3 +213,44 @@ void pthread_cond_timedwait_c(pthread_cond_t *cond, pthread_mutex_t *mutex,
 }
 
 
+/* Semaphores (semaphore.h) */
+void sem_init_c(sem_t *sem, int pshared, unsigned int value)
+{
+    int rc;
+    rc = sem_init(sem, pshared, value);
+    if (rc < 0) {
+        print_error_and_exit("sem_init", rc);
+    }
+}
+
+void sem_destroy_c(sem_t *sem)
+{
+    int rc;
+    rc = sem_destroy(sem);
+    if (rc < 0) {
+        print_error_and_exit("sem_destroy", rc);
+    }
+}
+
+void sem_post_c(sem_t *sem)
+{
+    int rc;
+    rc = sem_post(sem);
+    if (rc < 0) {
+        print_error_and_exit("sem_post", rc);
+    }
+}
+
+
+void sem_wait_c(sem_t *sem)
+{
+    int rc;
+    rc = sem_wait(sem);
+    if (rc < 0) {
+        print_error_and_exit("sem_wait", rc);
+    }
+}
+
+
+// int    sem_timedwait_c(sem_t *sem, const time_t abs_timeout);
+// int    sem_trywait_c(sem_t *sem);

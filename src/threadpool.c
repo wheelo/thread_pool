@@ -102,7 +102,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 	is_worker = false;
 
     /* Initialize the thread pool */
-	struct thread_pool* pool = (struct thread_pool*) checked_malloc(sizeof(struct thread_pool));
+	struct thread_pool* pool = (struct thread_pool*) malloc_c(sizeof(struct thread_pool));
 
     list_init(&pool->gs_queue);    
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
@@ -118,7 +118,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     // Initialize all workers and add to threadpool worker list
 	int i;
 	for (i = 0; i < nthreads; ++i) {
-		struct worker *worker = (struct worker *) checked_malloc(sizeof(struct worker));        
+		struct worker *worker = (struct worker *) malloc_c(sizeof(struct worker));        
         worker = worker_init(worker, i);  
 
         list_push_back(&pool->worker_list, &worker->elem);
@@ -135,7 +135,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
         // to be passed as a parameter to worker_function()
     	struct thread_pool_and_current_worker *pool_and_worker = 
-    	        (struct thread_pool_and_current_worker*) checked_malloc(sizeof(struct thread_pool_and_current_worker));
+    	        (struct thread_pool_and_current_worker*) malloc_c(sizeof(struct thread_pool_and_current_worker));
     	pool_and_worker->pool = pool;
     	pool_and_worker->worker = current_worker;
 
@@ -202,7 +202,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     if (task == NULL) { print_error_and_exit("thread_pool_submit() task arg cannot be NULL"); }
 
     /* Initialize Future struct */
-    struct future *p_future = (struct future*) checked_malloc(sizeof(struct future));
+    struct future *p_future = (struct future*) malloc_c(sizeof(struct future));
     p_future->param_for_task_fp = data;
     p_future->task_fp = task;
     p_future->result = NULL;
@@ -278,6 +278,7 @@ void * future_get(struct future *f)
 void future_free(struct future *f) 
 {
     if (f == NULL) { print_error_and_exit("future_free() called with NULL parameter"); }
+    // sem_destroy_c
     free(f);
 }
 
@@ -335,7 +336,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 static struct worker * worker_init(struct worker *worker, unsigned int worker_thread_index) 
 {
     // malloc the worker's thread
-    pthread_t *ptr_thread = (pthread_t *) checked_malloc(sizeof(pthread_t)); 
+    pthread_t *ptr_thread = (pthread_t *) malloc_c(sizeof(pthread_t)); 
     worker->thread_id = ptr_thread;
 
     worker->worker_thread_index = worker_thread_index;
