@@ -117,50 +117,35 @@ struct thread_pool * thread_pool_new(int nthreads)
 	return pool;
 }
 
+/**
+ * Shut down the threadpool. Already executing functions complete and
+ * queued futures(in the global submission queue or a worker threads local
+ * deque) do not complete.
+ *
+ * The calling thread must join all worker threads before returning.
+ */
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
-	if (pool == NULL) { 
-        exception_exit("thread_pool_shutdown_and_destroy: pool is NULL.\n");
-    }
+	if (pool == NULL) { exception_exit("thread_pool_shutdown_and_destroy: pool is NULL.\n"); }
     if (pool->shutdown_requested == true) { return; } // already called
     
     pool->shutdown_requested = true;
 
-    /* Wake up any sleeping threads prior to exit */
+    // Wake up any sleeping threads prior to exit 
     pthread_cond_broadcast_c(&pool->gs_queue_has_tasks); // QUinn: why?
-
-    /* NOTES: 
-
-    To allow other threads to continue execution, the main thread should 
-    terminate by calling pthread_exit() rather than exit(3).
-
-        TODO: if shutdown called, just stop entire threadpool (ignore ) ???
-            No, probably have to finish all futures related to the current external submission (e.g., mergesort)
-        TODO: Spec 2.4 "The calling thread must join all worker threads before returning"
-        but...says not to use pthread_cancel b/c currently executing futures not guaranteed to complete.
-        i.e., all currently executing futures must be completed. And to evaluate the future result, all
-        tasks (futures) spawned from the original external submission must complete and be joined.
-
-        Currently there are no tests that have multiple external submissions. May not need to even consider
-        what to do if there are >= 2 external submissions and the first is being evaluated and there are
-        additional external submissions in the global queue. But if we have to, it seems reasonable to 
-        finish the currently executing one, and just cancel any submissions in the global queue. */
-
-
-	/* TODO call pthread_join() on threads to wait for them to finish and reap their resources */
-	// DON'T use pthread_cancel()
 
     int i;
     for (i = 0; i < pool->number_of_workers; i++) {
 		//struct worker *worker = list_entry(e, struct worker, elem);
         struct worker *current_worker = pool->workers + i;
-		pthread_join_c(*current_worker->thread_id, NULL);   // NOTE:  the value passed to pthread_exit() by the terminating thread is
-                                                    // stored in the location referenced by value_ptr.
+		pthread_join_c(*current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
+                                                            // stored in the location referenced by value_ptr.
         worker_free(current_worker);
 	}
 
-	// TODO destroy other stuff
-
+    pthread_mutex_destroy_c(&pool->gs_queue_lock);
+    pthread_cond_destroy_c(&pool->gs_queue_has_tasks);
+    free(pool);
 }
 
 struct future * thread_pool_submit(struct thread_pool *pool,
