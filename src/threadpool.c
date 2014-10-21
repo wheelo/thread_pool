@@ -76,7 +76,9 @@ struct future {
     fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
     void* result;
-    sem_t semaphore; // for if result is finished computing
+    sem_t result_sem; // for if result is finished computing
+
+    pthread_mutex_lock lock;
     
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
@@ -100,8 +102,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 	is_worker = false;
 
     /* Initialize the thread pool */
-	struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
-	if (pool == NULL) { print_error_and_exit("malloc() error\n"); } 
+	struct thread_pool* pool = (struct thread_pool*) checked_malloc(sizeof(struct thread_pool));
 
     list_init(&pool->gs_queue);    
     if (pthread_mutex_init(&pool->gs_queue_lock, NULL) != 0) { print_error_and_exit("pthread_mutex_init() error\n"); }
@@ -117,8 +118,8 @@ struct thread_pool * thread_pool_new(int nthreads)
     // Initialize all workers and add to threadpool worker list
 	int i;
 	for (i = 0; i < nthreads; ++i) {
-		struct worker *worker = (struct worker *) malloc(sizeof(struct worker));        
-        worker = worker_init(worker, i); 
+		struct worker *worker = (struct worker *) checked_malloc(sizeof(struct worker));        
+        worker = worker_init(worker, i);  
 
         list_push_back(&pool->worker_list, &worker->elem);
 	}
@@ -134,7 +135,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
         // to be passed as a parameter to worker_function()
     	struct thread_pool_and_current_worker *pool_and_worker = 
-    	        (struct thread_pool_and_current_worker*) malloc(sizeof(struct thread_pool_and_current_worker));
+    	        (struct thread_pool_and_current_worker*) checked_malloc(sizeof(struct thread_pool_and_current_worker));
     	pool_and_worker->pool = pool;
     	pool_and_worker->worker = current_worker;
 
@@ -147,7 +148,12 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
-	if (pool == NULL) { print_error_and_exit("hread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
+
+    /* NOTE: To allow other threads to continue execution, the main thread should 
+    terminate by calling pthread_exit() rather than exit(3). */
+
+
+	if (pool == NULL) { print_error_and_exit("thread_pool_shutdown_and_destroy() pool arg cannot be NULL"); }
     if (pool->shutdown_requested == true) { return; } // if already called thread_pool_shutdown_and_destroy()
     // broadcast - wake up any sleeping threads prior to exiting
     if (pthread_cond_broadcast(&pool->gs_queue_has_tasks) != 0) { print_error_and_exit("pthread_cond_broadcast()\n"); }
@@ -196,12 +202,12 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     if (task == NULL) { print_error_and_exit("thread_pool_submit() task arg cannot be NULL"); }
 
     /* Initialize Future struct */
-    struct future *p_future = (struct future*) malloc(sizeof(struct future));
+    struct future *p_future = (struct future*) checked_malloc(sizeof(struct future));
     p_future->param_for_task_fp = data;
     p_future->task_fp = task;
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
-    if (sem_init(&p_future->semaphore, 0, 0) < 0) { print_error_and_exit("sem_init() error"); }
+    if (sem_init(&p_future->result_sem, 0, 0) < 0) { print_error_and_exit("sem_init() error"); }
 
     // if this thread is not a worker, add future to global queue 
     if (!is_worker) {
@@ -256,13 +262,13 @@ void * future_get(struct future *f)
         else if (f->status == NOT_STARTED) {
             // TODO:??? f->result = (*(f->task_fp))(pool, f->param_for_task_fp);
             f->status = COMPLETED;
-            sem_post(&f->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+            sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
         }
         return f->result;
     } else { 
         // thread executing this is not a worker thread so it is safe to 
         // sem_wait()
-        sem_wait(&f->semaphore); // decrement_and_block_if_the_result_is_negative()
+        sem_wait(&f->result_sem); // decrement_and_block_if_the_result_is_negative()
         // when the value is incremented by worker_function the result will be 
         // computed
         return f->result;
@@ -287,7 +293,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 
 	while (true) {
 		// if there are futures in local deque execute them first
-		if(!list_empty(&worker->local_deque)) {
+		if (!list_empty(&worker->local_deque)) {
 			
             // TODO: check errors
             pthread_mutex_lock(&worker->local_deque_lock);
@@ -297,7 +303,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->status = COMPLETED;
-			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
 		} // else if there are futures in gs_queue execute them second 
 		else if (!list_empty(&pool->gs_queue)) {
 			pthread_mutex_lock(&pool->gs_queue_lock);
@@ -306,7 +312,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 
 			future->result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->status = COMPLETED;
-			sem_post(&future->semaphore); // increment_and_wake_a_waiting_thread_if_any()
+			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
 		} 
 		// TODO: else work stealing...
 		// "Otherwise, the worker attempts to steal tasks to work on from the
@@ -329,8 +335,7 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 static struct worker * worker_init(struct worker *worker, unsigned int worker_thread_index) 
 {
     // malloc the worker's thread
-    pthread_t *ptr_thread = (pthread_t *) malloc(sizeof(pthread_t)); 
-    if (ptr_thread == NULL) { print_error_and_exit("malloc error\n"); }
+    pthread_t *ptr_thread = (pthread_t *) checked_malloc(sizeof(pthread_t)); 
     worker->thread_id = ptr_thread;
 
     worker->worker_thread_index = worker_thread_index;
