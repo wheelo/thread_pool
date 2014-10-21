@@ -158,6 +158,7 @@ static int depth = 3;
 static void 
 qsort_parallel(int *array, int N) 
 {
+    fprintf(stdout, "called %s(array, %d)\n", "qsort_parallel", N);
     struct qsort_task root = {
         .left = 0, .right = N-1, .depth = depth, .array = array
     };
