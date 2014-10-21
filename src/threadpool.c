@@ -5,6 +5,11 @@
  **************************************************/
 
 #include "threadpool.h"
+#include <stdio.h> // printf()
+#include <stdlib.h> // malloc()
+#include <pthread.h> // pthread_create()
+#include <semaphore.h> // sem_wait() sem_post()
+#include "list.h"
 
 /**
  * Holds the threadpool and the current worker to be passed in to function
@@ -20,6 +25,7 @@ struct thread_pool_and_current_worker {
 static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
 static struct worker * worker_init(struct worker * worker, unsigned int index_of_worker);
 static void worker_free(struct worker *worker);
+static void exception_exit(char *string);
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -28,6 +34,12 @@ static void worker_free(struct worker *worker);
  *       the worker threads you create in thread_pool_new().
  */
 __thread bool is_worker; 
+
+typedef enum FutureStatus_ {
+    NOT_STARTED,
+    IN_PROGRESS,
+    COMPLETED
+} FutureStatus;
 
 /**
  * Represents a task that needs to be done. Contains fields need to execute
@@ -342,4 +354,10 @@ static void worker_free(struct worker *worker)
     if (worker == NULL) { exception_exit("worker_free() you cannot pass NULL\n"); }
     pthread_mutex_destroy_c(&worker->local_deque_lock);
     free(worker);
+}
+
+static void exception_exit(char *string)
+{
+    fprintf(stderr, "%s\n", string);
+    exit(EXIT_FAILURE); 
 }
