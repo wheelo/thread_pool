@@ -40,8 +40,9 @@ struct future {
     fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
     void *result;
-    sem_t semaphore; // for if result is finished computing
-    
+    sem_t result_sem; // for if result is finished computing
+    pthread_mutex_t f_lock;
+
     FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
 
     struct thread_pool *p_pool;  
@@ -88,13 +89,8 @@ struct thread_pool {
     int creator_id; // index of the worker in whose work deque the future
                     // was placed when it was created.
 
-<<<<<<< HEAD
-    bool shutdown_requested;     
-    unsigned int num_workers;                 
-=======
     bool shutdown_requested; 
     unsigned int num_workers;                     
->>>>>>> 6d573ca17db596e347e880f85360465a18a21199
     struct worker *workers;
 };
 
@@ -119,20 +115,21 @@ struct thread_pool * thread_pool_new(int nthreads)
        in the global submission queue */
     pthread_cond_init_c(&pool->gs_queue_has_tasks, NULL);
     pool->num_workers = nthreads;
-    pool->workers = (struct worker *) malloc(nthreads * sizeof(struct worker)); 
+    pool->workers = (struct worker *) malloc_c(nthreads * sizeof(struct worker)); 
 
+    struct worker *p_wkr = pool->workers;
     // Initialize all workers and add to threadpool worker list
 	int i;
 	for (i = 0; i < nthreads; i++) {
-		//struct worker *worker = (struct worker *) malloc(sizeof(struct worker));        
-        //worker = worker_init(worker, i); 
-        (pool->workers + i) = *((struct worker *) malloc(sizeof(struct worker)));
-        pool->workers[i] = *(worker_init(&pool->workers[i], i));        
+        //&(wkr + i) 
+        //wkr = &(pool->workers[i]);
+        p_wkr = (struct worker *) malloc_c(sizeof(struct worker));
+        p_wkr = worker_init( &(*(p_wkr + i)) , i);
 	}
 
     pool->shutdown_requested = false;
 
-    for (i = 0; i < pool->num_worker; i++) {
+    for (i = 0; i < pool->num_workers; i++) {
         struct worker *current_worker = pool->workers + i;
         // to be passed as a parameter to worker_function()
     	struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) 
@@ -182,9 +179,9 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     for (i = 0; i < pool->num_workers; i++) {
 		//struct worker *worker = list_entry(e, struct worker, elem);
         struct worker *current_worker = pool->workers + i;
-		pthread_join_c(*worker->thread_id, NULL);   // NOTE:  the value passed to pthread_exit() by the terminating thread is
+		pthread_join_c(*current_worker->thread_id, NULL);   // NOTE:  the value passed to pthread_exit() by the terminating thread is
                                                     // stored in the location referenced by value_ptr.
-        worker_free(worker);
+        worker_free(current_worker);
 	}
 
 	// TODO destroy other stuff
@@ -209,7 +206,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->result = NULL;
     p_future->status = NOT_STARTED;
     sem_init_c(&p_future->result_sem, 0, 0);
-    pthread_mutex_lock(&p_future->lock);
+
+    pthread_mutex_init_c(&p_future->f_lock, NULL);
 
     // if this thread is not a worker, add future to global queue (external submission)
     if (!is_worker) {
@@ -312,10 +310,12 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
 
-            // lock
+            pthread_mutex_lock_c(&future->f_lock);            
 			future->result = result;
-            future->status = COMPLETED;
+            future->status = COMPLETED;            
 			sem_post_c(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
+            pthread_mutex_unlock_c(&future->f_lock);            
+
 		} // else if there are futures in gs_queue execute them second 
 		else if (!list_empty(&pool->gs_queue)) {
 			pthread_mutex_lock_c(&pool->gs_queue_lock);
@@ -323,9 +323,12 @@ static void * worker_function(struct thread_pool_and_current_worker *pool_and_wo
 			pthread_mutex_unlock_c(&pool->gs_queue_lock);
 
 			void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
+            
+            pthread_mutex_lock_c(&future->f_lock);
             future->result = result;
-            future->status = COMPLETED;
+            future->status = COMPLETED;            
 			sem_post_c(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
+            pthread_mutex_unlock_c(&future->f_lock);
 		} 
 		else {
 

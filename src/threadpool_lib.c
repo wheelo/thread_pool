@@ -61,14 +61,6 @@ void timespec_print(struct timespec ts, char *buf, size_t buflen)
  *   - Not all pthread or semaphore functions included
  ***************************************************************************/
 
-/*
-
-void print_error_and_exit(char* error_message) 
-{
-    write(stderr, error_message, strlen(error_message));
-    exit(EXIT_FAILURE);
-}
-*/
 
 void error_exit(char *msg, int err_code)
 {
@@ -103,7 +95,7 @@ void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr,
     int rc; // return code
     rc = pthread_create(thread, attr, start_routine, (void *)arg);
     if (rc != 0) {
-        print_error_and_exit("pthread_create", rc);
+        error_exit("pthread_create", rc);
     }
 }
 
@@ -112,7 +104,7 @@ void pthread_join_c(pthread_t thread, void **value_ptr)
     int rc;
     rc = pthread_join(thread, value_ptr);
     if (rc != 0) {
-        print_error_and_exit("pthread_join", rc);
+        error_exit("pthread_join", rc);
     }
 }
 
@@ -121,7 +113,7 @@ void pthread_join_c(pthread_t thread, void **value_ptr)
 pthread_t pthread_self_c(void)
 {
     // does not return any errors, included for convenience
-    return pthread_self(void);
+    return pthread_self();
 }
 
 // Mutex Routines
@@ -130,7 +122,7 @@ void pthread_mutex_destroy_c(pthread_mutex_t *mutex)
     int rc;
     rc = pthread_mutex_destroy(mutex);
     if (rc != 0) {
-        print_error_and_exit("pthread_mutex_destroy", rc);
+        error_exit("pthread_mutex_destroy", rc);
     }
 }
 
@@ -139,7 +131,7 @@ void pthread_mutex_init_c(pthread_mutex_t *mutex, const pthread_mutexattr_t *att
     int rc;
     rc = pthread_mutex_init(mutex, attr);
     if (rc != 0) {
-        print_error_and_exit("pthread_mutex_init", rc);
+        error_exit("pthread_mutex_init", rc);
     }
 }
 
@@ -148,7 +140,7 @@ void pthread_mutex_lock_c(pthread_mutex_t *mutex)
     int rc;
     rc = pthread_mutex_lock(mutex);
     if (rc != 0) {
-        print_error_and_exit("pthread_mutex_lock", rc);
+        error_exit("pthread_mutex_lock", rc);
     }
 }
 
@@ -158,7 +150,7 @@ void pthread_mutex_unlock_c(pthread_mutex_t *mutex)
     int rc;
     rc = pthread_mutex_unlock(mutex);
     if (rc != 0) {
-        print_error_and_exit("pthread_mutex_unlock", rc);
+        error_exit("pthread_mutex_unlock", rc);
     }
 }
 
@@ -168,7 +160,7 @@ void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr)
     int rc;
     rc = pthread_cond_init(cond, attr);
     if (rc != 0) {
-        print_error_and_exit("pthread_cond_init", rc);
+        error_exit("pthread_cond_init", rc);
     }
 }
 
@@ -177,7 +169,7 @@ void pthread_cond_destroy_c(pthread_cond_t *cond)
     int rc;
     rc = pthread_cond_destroy(cond);
     if (rc != 0) {
-        print_error_and_exit("pthread_cond_destroy", rc);
+        error_exit("pthread_cond_destroy", rc);
     }
 }
 
@@ -186,7 +178,7 @@ void pthread_cond_signal_c(pthread_cond_t *cond)
     int rc;
     rc = pthread_cond_signal(cond);
     if (rc != 0) {
-        print_error_and_exit("pthread_cond_signal", rc);
+        error_exit("pthread_cond_signal", rc);
     }
 }
 
@@ -195,30 +187,18 @@ void pthread_cond_broadcast_c(pthread_cond_t *cond)
     int rc;
     rc = pthread_cond_broadcast(cond);
     if (rc != 0) {
-        print_error_and_exit("pthread_cond_broadcast", rc);
+        error_exit("pthread_cond_broadcast", rc);
     }
 }
 
-void pthread_cond_wait_c(pthread_cond_t *restrict cond, 
-                         pthread_mutex_t *restrict mutex);
+void pthread_cond_wait_c(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
     int rc;
     rc = pthread_cond_wait(cond, mutex);
     if (rc != 0) {
-        print_error_and_exit("pthread_cond_wait", rc);
+        error_exit("pthread_cond_wait", rc);
     }
 }
-
-void pthread_cond_timedwait_c(pthread_cond_t *cond, pthread_mutex_t *mutex,
-                              const struct timespec *abstime)
-{
-    int rc;
-    rc = pthread_mutex_timedwait(cond, mutex, abstime);
-    if (rc != 0) {
-        print_error_and_exit("pthread_mutex_timedwait", rc);
-    }
-}
-
 
 /* Semaphores (semaphore.h) */
 void sem_init_c(sem_t *sem, int pshared, unsigned int value)
@@ -226,7 +206,7 @@ void sem_init_c(sem_t *sem, int pshared, unsigned int value)
     int rc;
     rc = sem_init(sem, pshared, value);
     if (rc < 0) {
-        print_error_and_exit("sem_init", rc);
+        error_exit("sem_init", rc);
     }
 }
 
@@ -235,7 +215,7 @@ void sem_destroy_c(sem_t *sem)
     int rc;
     rc = sem_destroy(sem);
     if (rc < 0) {
-        print_error_and_exit("sem_destroy", rc);
+        error_exit("sem_destroy", rc);
     }
 }
 
@@ -244,7 +224,7 @@ void sem_post_c(sem_t *sem)
     int rc;
     rc = sem_post(sem);
     if (rc < 0) {
-        print_error_and_exit("sem_post", rc);
+        error_exit("sem_post", rc);
     }
 }
 
@@ -253,7 +233,7 @@ void sem_wait_c(sem_t *sem)
     int rc;
     rc = sem_wait(sem);
     if (rc < 0) {
-        print_error_and_exit("sem_wait", rc);
+        error_exit("sem_wait", rc);
     }
 }
 
