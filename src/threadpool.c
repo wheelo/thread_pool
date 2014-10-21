@@ -1,3 +1,9 @@
+/**************************************************
+ * threadpool.c
+ *
+ * A work-stealing, fork-join thread pool.
+ **************************************************/
+
 #include "threadpool.h"
 
 /**
