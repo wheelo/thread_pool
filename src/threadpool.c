@@ -104,12 +104,14 @@ struct future {
 };
 
 struct worker {
-    pthread_t thread_id;
+    pthread_t *thread_id;
 
     unsigned int index_of_worker;
 
     struct list/*<Future>*/ local_deque;
     pthread_mutex_t local_deque_lock;
+
+    struct list_elem elem;
 };
 
 struct thread_pool {
@@ -119,6 +121,7 @@ struct thread_pool {
 
     bool shutdown_requested; 
 
+    struct list workers_list;
     unsigned int number_of_workers;                     
     struct worker *workers; // actual array of workers
 };
@@ -146,6 +149,16 @@ struct thread_pool * thread_pool_new(int nthreads)
 
     pool->number_of_workers = nthreads;
 
+    /*
+    // Initialize 
+    list_init(&pool->workers_list);
+    int i;
+    for(i = 0; i < nthreads; i++) {
+        struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
+        worker = worker_init(worker, i);
+    }
+    */
+
     // Initialize workers array
     pool->workers = (struct worker *) malloc_c(nthreads * sizeof(struct worker)); 
 
@@ -167,7 +180,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     	pool_and_worker->worker = current_worker;
         void *pool_and_worker2 = pool_and_worker;
 
-        pthread_create(&current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker2);
+        pthread_create(current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker2);
     }
 	return pool;
 }
@@ -193,7 +206,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     for (i = 0; i < pool->number_of_workers; i++) {
 		//struct worker *worker = list_entry(e, struct worker, elem);
         struct worker *current_worker = pool->workers + i;
-		pthread_join_c(current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
+		pthread_join(*current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
                                                             // stored in the location referenced by value_ptr.
         worker_free(current_worker);
 	}
@@ -410,6 +423,7 @@ static void * worker_function(void *pool_and_worker2)
 static struct worker * worker_init(struct worker *worker, unsigned int index_of_worker) 
 {
     //worker->thread_id = will be set when pthread_create() is called
+    worker->thread_id = (pthread_t *)malloc(sizeof(pthread_t));
     worker->index_of_worker = index_of_worker;
     list_init(&worker->local_deque); 
     pthread_mutex_init_c(&worker->local_deque_lock, NULL);
