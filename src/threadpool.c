@@ -82,7 +82,6 @@ struct thread_pool {
 
     struct list workers_list;
     unsigned int number_of_workers;                     
-    struct worker *workers; // actual array of workers
 };
 
 /**
@@ -152,17 +151,16 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     pool->shutdown_requested = true;
 
     // Wake up any sleeping threads prior to exit 
-    pthread_cond_broadcast(&pool->gs_queue_has_tasks); // QUinn: why?
+    //pthread_cond_broadcast(&pool->gs_queue_has_tasks); // QUinn: why?
 
-    int i;
-    for (i = 0; i < pool->number_of_workers; i++) {
-		//struct worker *worker = list_entry(e, struct worker, elem);
-        struct worker *current_worker = pool->workers + i;
-		pthread_join(*current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
+    struct list_elem *e;
+    for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
+        struct worker *current_worker = list_entry(e, struct worker, elem);
+        pthread_join(*current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
                                                             // stored in the location referenced by value_ptr.
         worker_free(current_worker);
-	}
-
+    }
+    
     pthread_mutex_destroy(&pool->gs_queue_lock);
     pthread_cond_destroy(&pool->gs_queue_has_tasks);
     free(pool);
