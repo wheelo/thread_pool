@@ -184,6 +184,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->status = NOT_STARTED;
     // -------------------------------------------------------------------------
 
+    fprintf(stdout, ">> in thread_pool_submit() is_worker = %d\n", is_worker);
+
     // If this thread is not a worker, add future to global queue (external submission)
     if (!is_worker) {
     	// Acquire lock for the global submission queue 
@@ -272,8 +274,8 @@ static void * worker_function(void *pool_and_worker2)
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
 
-    fprintf(stdout, ">>> worker->index_of_worker = %d\n", (int) worker->index_of_worker);
-    fprintf(stdout, ">>> worker->thread_id = %d\n", (int) *worker->thread_id);
+    fprintf(stdout, ">>> in worker_function() worker->index_of_worker = %d\n", (int) worker->index_of_worker);
+    fprintf(stdout, ">>> in worker_function() worker->thread_id = %d\n", (int) *worker->thread_id);
 
 	while (true) {
         pthread_mutex_lock(&worker->local_deque_lock);
