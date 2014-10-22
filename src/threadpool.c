@@ -109,7 +109,9 @@ struct thread_pool * thread_pool_new(int nthreads)
     //if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
 
 	is_worker = false; // worker_function() sets it to true
-
+    if (is_worker) {
+        fprintf(stdout, ">> in %s: failed to set is_worker value \n", "thread_pool_new");
+    }
 	struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
 
     list_init(&pool->gs_queue);    
@@ -188,16 +190,15 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
             fprintf(stdout, ">> in %s, inside workers_list loop before join\n", "thread_pool_shutdown_and_destroy");
         #endif
         struct worker *current_worker = list_entry(e, struct worker, elem);
-        fprintf(stdout, "")
         if (pthread_join(*current_worker->thread_id, NULL) != 0) {
              // NOTE: the value passed to pthread_exit() by the terminating thread is stored in the location 
               // referenced by value_ptr.
             #ifdef DEBUG
-                fprintf(stdout, ">> in %s, inside workers_list loop, join fails\n", "thread_pool_shutdown_and_destroy");
+                fprintf(stdout, " >> in %s, inside workers_list loop, join fails\n", "thread_pool_shutdown_and_destroy");
             #endif
         }
         #ifdef DEBUG
-            fprintf(stdout, ">> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
+            fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
         #endif
       
         worker_free(current_worker);
@@ -329,17 +330,19 @@ void future_free(struct future *f)
  */
 static void * worker_function(void *pool_and_worker2) 
 {
-    #ifdef DEBUG
-       // fprintf(stdout, ">> in %s(pool_and_worker)\n", "worker_function");
-    #endif
+        #ifdef DEBUG
+            fprintf(stdout, ">> in %s, first line\n", "worker_function");
+        #endif
 
 	is_worker = true; // = thread local variable
+    if (!is_worker) {
+        fprintf(stdout, ">> in %s: testing value of is_worker after setting \n", "worker_function");
+    }
     struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) pool_and_worker2;
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
 
-
-
+            
     /* The worker thread checks three potential locations for futures to execute */
 	while (true) {
         /* 1) Checks its own local deque first */
