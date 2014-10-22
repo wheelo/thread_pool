@@ -9,8 +9,6 @@
 #include <stdlib.h> // malloc()
 #include <pthread.h> // pthread_create()
 #include <semaphore.h> // sem_wait() sem_post()
-#include <assert.h>
-
 #include "list.h"
  
 #define DEBUG // comment out to turn off debug print statements
@@ -79,6 +77,8 @@ struct future {
 struct worker {
     pthread_t *thread_id;
 
+    unsigned int index_of_worker;
+
     struct list/*<Future>*/ local_deque;
     pthread_mutex_t local_deque_lock;
 
@@ -88,8 +88,7 @@ struct worker {
 struct thread_pool {
     struct list/*<Future>*/ gs_queue; // global submission queue
     pthread_mutex_t gs_queue_lock;      
-   
-    /* pthread_cond_t gs_queue_has_tasks;  */
+    pthread_cond_t gs_queue_has_tasks;  
 
     bool shutdown_requested; 
 
@@ -105,8 +104,7 @@ struct thread_pool {
 struct thread_pool * thread_pool_new(int nthreads) 
 {
     //fprintf(stdout, "> called %s(%d)\n", "thread_pool_new", nthreads);
-	assert(nthreads > 0);
-    //if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
+	if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
 
 	is_worker = false; // worker_function() sets it to true
 
@@ -117,8 +115,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
     // Initialize condition variable used to broadcast to worker threads that 
     // tasks are available in the global submission queue 
-    
-    /* don't delete pthread_cond_init(&pool->gs_queue_has_tasks, NULL); */
+    pthread_cond_init(&pool->gs_queue_has_tasks, NULL);
 
     pool->shutdown_requested = false;
 
@@ -130,6 +127,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     for(i = 0; i < nthreads; i++) {
         struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
         worker->thread_id = (pthread_t *)malloc(sizeof(pthread_t));
+        worker->index_of_worker = i;
         list_init(&worker->local_deque); 
         pthread_mutex_init(&worker->local_deque_lock, NULL);
         list_push_back(&pool->workers_list, &worker->elem);
@@ -161,53 +159,27 @@ struct thread_pool * thread_pool_new(int nthreads)
  */
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
-    //int rc;
-	assert(pool != NULL);
-    if (pool->shutdown_requested) { // already called
-       //exception_exit("thread_pool_shutdown_and_destroy: called multiple times.\n");
-       #ifdef DEBUG
-        fprintf(stdout, "in  %s: : called multiple times or logic error\n", "thread_pool_shutdown_and_destroy");
-       #endif
-
-       return; 
-    } 
+	if (pool == NULL) { exception_exit("thread_pool_shutdown_and_destroy: pool is NULL.\n"); }
+    if (pool->shutdown_requested == true) { return; } // already called
     
     pool->shutdown_requested = true;
 
-     /* TODO: will deal with sleep/wake after all other issues fixed */
-        // Wake up any sleeping threads prior to exit 
-        //pthread_cond_broadcast(&pool->gs_queue_has_tasks); // QUinn: why?
-    
-        // must also release lock (reacquired at wake)
-        // pthread_mutex_unlock_c(&pool-> [cond]);
+    // Wake up any sleeping threads prior to exit 
+    //pthread_cond_broadcast_c(&pool->gs_queue_has_tasks); // QUinn: why?
+    // must also release lock (reacquired at wake)
+    // pthread_mutex_unlock_c(&pool-> [cond]);
 
-    /* Join */
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
-        #ifdef DEBUG
-            fprintf(stdout, ">> in %s, inside workers_list loop before join\n", "thread_pool_shutdown_and_destroy");
-        #endif
         struct worker *current_worker = list_entry(e, struct worker, elem);
-        fprintf(stdout, "")
-        if (pthread_join(*current_worker->thread_id, NULL) != 0) {
-             // NOTE: the value passed to pthread_exit() by the terminating thread is stored in the location 
-              // referenced by value_ptr.
-            #ifdef DEBUG
-                fprintf(stdout, ">> in %s, inside workers_list loop, join fails\n", "thread_pool_shutdown_and_destroy");
-            #endif
-        }
-        #ifdef DEBUG
-            fprintf(stdout, ">> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
-        #endif
-      
+        pthread_join(*current_worker->thread_id, NULL);   // NOTE: the value passed to pthread_exit() by the terminating thread is
+                                                            // stored in the location referenced by value_ptr.
         worker_free(current_worker);
     }
 
-    if (pthread_mutex_destroy(&pool->gs_queue_lock)) fprintf(stdout, "mutex_destroy : prob. still locked!\n");
-    // TODO cond vars
-    // pthread_cond_destroy(&pool->gs_queue_has_tasks); fprintf(stdout, "cond_destroy : prob. still locked!\n");
+    pthread_mutex_destroy(&pool->gs_queue_lock);
+    pthread_cond_destroy(&pool->gs_queue_has_tasks);
     free(pool);
-    return;
 }
 
 struct future * thread_pool_submit(struct thread_pool *pool,
@@ -338,7 +310,10 @@ static void * worker_function(void *pool_and_worker2)
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
 
-
+    #ifdef DEBUG
+       // fprintf(stdout, ">>> in worker_function() worker->index_of_worker = %d\n", (int) worker->index_of_worker);
+       // fprintf(stdout, ">>> in worker_function() worker->thread_id = %d\n", (int) *worker->thread_id);
+    #endif
 
     /* The worker thread checks three potential locations for futures to execute */
 	while (true) {
@@ -452,7 +427,9 @@ static void * worker_function(void *pool_and_worker2)
  */
 static void worker_free(struct worker *worker)
 {
-    assert(worker != NULL);
+    if (worker == NULL) { 
+        exception_exit("worker_free() you cannot pass NULL\n"); 
+    }
     pthread_mutex_destroy(&worker->local_deque_lock);
     free(worker);
 }
@@ -462,4 +439,3 @@ static void exception_exit(char *msg)
     fprintf(stderr, "%s\n", msg);
     exit(EXIT_FAILURE);
 }
-
