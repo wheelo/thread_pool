@@ -25,8 +25,8 @@ static void * malloc_c(int size);
 
 /* POSIX Threads (pthread.h) */
 // Thread Routines
-static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
-                      void *(*start_routine)(void *), void *arg);
+//static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
+//                     void *(*start_routine)(void *), void *arg);
 static void pthread_join_c(pthread_t thread, void **value_ptr);
 static pthread_t pthread_self_c(void);
 // Mutex Routines
@@ -62,7 +62,7 @@ struct thread_pool_and_current_worker {
 };
 
 // private functions for this class that must be declared here to be called below
-static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker);
+static void * worker_function(void *pool_and_worker);
 static struct worker * worker_init(struct worker * worker, unsigned int index_of_worker);
 static void worker_free(struct worker *worker);
 static void exception_exit(char *msg);
@@ -128,7 +128,7 @@ struct thread_pool {
  */
 struct thread_pool * thread_pool_new(int nthreads) 
 {
-    fprintf(stdout, "called %s(%d)\n", "thread_pool_new", nthreads);
+    fprintf(stdout, ">> called %s(%d)\n", "thread_pool_new", nthreads);
 	if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
 
 	is_worker = false; // worker_function() sets it to true
@@ -152,20 +152,22 @@ struct thread_pool * thread_pool_new(int nthreads)
     struct worker *p_worker = pool->workers;
 	int i;
 	for (i = 0; i < nthreads; i++) {
-        p_worker = (struct worker *) malloc_c(sizeof(struct worker));
-        p_worker = worker_init( &(*(p_worker + i)) , i);
+        p_worker[i] = *((struct worker *) malloc_c(sizeof(struct worker)));
+        p_worker[i] = *(worker_init( (p_worker + i) , i));
 	}
+
+    // to be passed as a parameter to worker_function()
+    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) 
+                malloc_c(sizeof(struct thread_pool_and_current_worker));
+    pool_and_worker->pool = pool;
 
     for (i = 0; i < pool->number_of_workers; i++) {
         struct worker *current_worker = pool->workers + i;
 
-        // to be passed as a parameter to worker_function()
-    	struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) 
-                malloc_c(sizeof(struct thread_pool_and_current_worker));
-    	pool_and_worker->pool = pool;
     	pool_and_worker->worker = current_worker;
+        void *pool_and_worker2 = pool_and_worker;
 
-        pthread_create_c(&current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker);
+        pthread_create(&current_worker->thread_id, NULL, (void *) worker_function, pool_and_worker2);
     }
 	return pool;
 }
@@ -298,18 +300,24 @@ void future_free(struct future *f)
  * This is the logic for how a worker thread decides to execute a 
  * task.
  */
-static void * worker_function(struct thread_pool_and_current_worker *pool_and_worker) 
+static void * worker_function(void *pool_and_worker2) 
 {
+    fprintf(stdout, ">>>> in %s(pool_and_worker)\n", "worker_function");
+
 	is_worker = true; // = thread local variable
+    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) pool_and_worker2;
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
+
+    fprintf(stdout, ">>>> worker->index_of_worker = %d\n", (int) worker->index_of_worker);
+    fprintf(stdout, ">>>> worker->thread_id = %d\n", (int) worker->thread_id);
 
 	while (true) {
         pthread_mutex_lock_c(&worker->local_deque_lock);
         bool worker_deque_locked = true;
 
 		// if there are futures in local deque execute them first
-		if (!list_empty(&worker->local_deque)) {	 
+		if (!list_empty(&worker->local_deque)) {
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock_c(&worker->local_deque_lock);
             worker_deque_locked = false;
@@ -454,8 +462,8 @@ static void * malloc_c(int size)
     return p;
 }
 
-
-/* POSIX Threads (pthread.h) */
+/**
+// POSIX Threads (pthread.h) 
 // Thread Routines
 static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
                       void *(*start_routine)(void *), void *arg)
@@ -466,7 +474,7 @@ static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr,
         error_exit("pthread_create", rc);
     }
 }
-
+*/
 static void pthread_join_c(pthread_t thread, void **value_ptr)
 {
     int rc;
