@@ -188,6 +188,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
     // If this thread is not a worker, add future to global queue (external submission)
     if (!is_worker) {
+
     	// Acquire lock for the global submission queue 
     	pthread_mutex_lock(&pool->gs_queue_lock);
 	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
