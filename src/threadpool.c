@@ -222,8 +222,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 {
     //fprintf(stdout, "called %s(pool, task, data)\n", "thread_pool_submit");
 
-    if (pool == NULL) { exception_exit("thread_pool_submit() pool arg cannot be NULL"); }
-    if (task == NULL) { exception_exit("thread_pool_submit() task arg cannot be NULL"); }
+    assert(pool != NULL && task != NULL);
     // --------------------- Initialize Future struct --------------------------
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
     pthread_mutex_init(&p_future->f_lock, NULL);
@@ -310,8 +309,13 @@ void * future_get(struct future *f)
 
 void future_free(struct future *f) 
 {
+<<<<<<< HEAD
     if (f == NULL) { exception_exit("future_free() called with NULL parameter"); }
     //pthread_mutex_destroy(&f->f_lock);
+=======
+    assert(f != NULL);
+    pthread_mutex_destroy(&f->f_lock);
+>>>>>>> e92675fb8ff5b5fbb4ea1c7f072584b1ca143bcc
     sem_destroy(&f->result_sem);
     free(f);
 }
@@ -471,9 +475,5 @@ static void worker_free(struct worker *worker)
     free(worker);
 }
 
-static void exception_exit(char *msg)
-{
-    fprintf(stderr, "%s\n", msg);
-    exit(EXIT_FAILURE);
-}
+
 
