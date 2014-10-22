@@ -308,12 +308,15 @@ static void * worker_function(void *pool_and_worker2)
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
 
-    fprintf(stdout, ">>> in worker_function() worker->index_of_worker = %d\n", (int) worker->index_of_worker);
-    fprintf(stdout, ">>> in worker_function() worker->thread_id = %d\n", (int) *worker->thread_id);
+    #ifdef DEBUG
+        fprintf(stdout, ">>> in worker_function() worker->index_of_worker = %d\n", (int) worker->index_of_worker);
+        fprintf(stdout, ">>> in worker_function() worker->thread_id = %d\n", (int) *worker->thread_id);
+    #endif
 
+    /* The worker thread checks three potential locations for futures to execute */
 	while (true) {
+        /* 1) Checks its own local deque first */
         pthread_mutex_lock(&worker->local_deque_lock);
-
         /* TODO
          * May need to remove booleans here -- because you always have to make sure the lock has
          * been maintained the entire time since its value was last set, or else it could be
@@ -323,19 +326,13 @@ static void * worker_function(void *pool_and_worker2)
          * doing something with the mutex'd object afterwards.
          */
         //bool worker_deque_locked = true;
-
-		/* if there are futures in local deque execute them first */
 		if (!list_empty(&worker->local_deque)) {
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
-            worker_deque_locked = false;
 
             pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?    
-
             f->status = IN_PROGRESS;
-            void *result = (*(future->task_fp))(pool, future->param_for_task_fp);    
-
-
+            void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /* execute future task */
 			future->result = result;
             future->status = COMPLETED;            
 			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
@@ -346,17 +343,13 @@ static void * worker_function(void *pool_and_worker2)
         // 'if' must be false to get to this point. When 'if' true, releases lock. 
         pthread_mutex_unlock(&worker->local_deque_lock);   // fails with EPERM if not owner
 
-        /*  else if there are futures in gs_queue execute them second */
+        /* 2) Check for futures in global threadpool queue  */
         pthread_mutex_lock(&pool->gs_queue_lock);
 		if (!list_empty(&pool->gs_queue)) {
-            // "If a worker runs out of tasks, it checks a global submission queue for tasks. If a task
-            //  can be found it it, it is executed" from 2.1 of spec
 			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
 			pthread_mutex_unlock(&pool->gs_queue_lock);
-            gs_queue_locked = false;
-
+            
             pthread_mutex_lock(&future->f_lock);
-
             f->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->result = result;
@@ -366,49 +359,52 @@ static void * worker_function(void *pool_and_worker2)
 
             continue; // // there might be another future in global submission queue to execute   
 		} 
-        // 'if' must be false to get to this point. When 'if' true, releases lock inside the 'if' block.        
         pthread_mutex_unlock(&pool->gs_queue);
 
-        // the local deque and global submission are empty
-		if (true) { // TODO: consider removing later?
-            // "Otherwise, the worker attempts to steal tasks to work on from the bottom of other
-            //  threads'" deques.
+        /* 3) The worker attempts steals a task to work on from the bottom of other threads' deques */
+        // iterate through other worker threads' deques
 
-            // iterate through other worker threads' deques
-            struct list_elem *e;
+        struct list_elem *e;
+        bool stole_a_task = false;
+        // for each worker in the pool
+        do {
             for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
                 struct worker *other_worker = list_entry(e, struct worker, elem);
-
-                // starting at the bottom through other_worker's local deque
-                // and check if there is an unstarted future to steal and execute
+                // steal task from bottom of their deque, if they have any tasks
                 pthread_mutex_lock(&other_worker->local_deque_lock);
-                bool other_worker_deque_locked = true;
-
+                // will check its own queue, but it'll be empty, so not terribly inefficient?
                 if (!list_empty(&other_worker->local_deque)) {
                     struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
                     pthread_mutex_unlock(&other_worker->local_deque_lock);
-
+                    stole_a_task = true;
                     // now execute this stolen future 
-                    pthread_mutex_lock(&stolen_future->f_lock);
-                    
+                    pthread_mutex_lock(&stolen_future->f_lock);                
                     f->status = IN_PROGRESS;
                     void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp);
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
                     sem_post(&stolen_future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
-                    pthread_mutex_unlock(&stolen_future->f_lock);
+                    pthread_mutex_unlock(&stolen_future->f_lock);      
                 }
-
-                if(other_worker_deque_locked) {
-                    pthread_mutex_unlock(&other_worker->local_deque_lock);  
+                else {
+                    pthread_mutex_unlock(&other_worker->local_deque_lock);
                 }
             }
+        } while (stole_a_task); // if it stole > 1 task, continue stealing by restarting the loop through
+                                // all workers. 
+        //otherwise sleep until gs_queue has submission
+        // NOTE: NOT CURRENTLY AWOKEN IF NEW INTERNAL TASK! COULD CAUSE ISSUES or
+        // at best is inefficient. try to resolve after making sure no deadlocks elsewhere
 
-            // literally no futures to execute or steal so wait
-            // need to wrap in while loop? or is it ok since within a while anyways?
+
             /* pthread_mutex_lock(&pool->gs_queue_lock);
               bool gs_queue_locked = true;
-              while (list_empty(&pool->gs_queue)) { // TODO: change to futures list
+
+              // TODO: change to futures list? contains any available? or have a
+              // counter or semaphore which is incremented each time a task is submitted to the pool (internal or external)
+              // and decremented each time a task is executed.
+              while (list_empty(&pool->gs_queue)) { 
+
                   pthread_cond_wait(&pool->gs_queue_has_tasks, &pool->gs_queue_lock); // TODO: ?
               }
                     NOTE: spurious wakeups - https://stackoverflow.com/questions/8594591/why-does-pthread-cond-wait-have-spurious-wakeups
