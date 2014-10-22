@@ -331,7 +331,7 @@ static void * worker_function(void *pool_and_worker2)
 			pthread_mutex_unlock(&worker->local_deque_lock);
 
             pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?    
-            f->status = IN_PROGRESS;
+            future->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /* execute future task */
 			future->result = result;
             future->status = COMPLETED;            
@@ -350,7 +350,7 @@ static void * worker_function(void *pool_and_worker2)
 			pthread_mutex_unlock(&pool->gs_queue_lock);
             
             pthread_mutex_lock(&future->f_lock);
-            f->status = IN_PROGRESS;
+            future->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->result = result;
             future->status = COMPLETED;            
@@ -359,7 +359,7 @@ static void * worker_function(void *pool_and_worker2)
 
             continue; // // there might be another future in global submission queue to execute   
 		} 
-        pthread_mutex_unlock(&pool->gs_queue);
+        pthread_mutex_unlock(&pool->gs_queue_lock);
 
         /* 3) The worker attempts steals a task to work on from the bottom of other threads' deques */
         // iterate through other worker threads' deques
@@ -379,7 +379,7 @@ static void * worker_function(void *pool_and_worker2)
                     stole_a_task = true;
                     // now execute this stolen future 
                     pthread_mutex_lock(&stolen_future->f_lock);                
-                    f->status = IN_PROGRESS;
+                    stolen_future->status = IN_PROGRESS;
                     void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp);
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
@@ -392,31 +392,29 @@ static void * worker_function(void *pool_and_worker2)
             }
         } while (stole_a_task); // if it stole > 1 task, continue stealing by restarting the loop through
                                 // all workers. 
-        //otherwise sleep until gs_queue has submission
-        // NOTE: NOT CURRENTLY AWOKEN IF NEW INTERNAL TASK! COULD CAUSE ISSUES or
-        // at best is inefficient. try to resolve after making sure no deadlocks elsewhere
+        
+
+        /* Failing that, the worker thread should block until a task becomes available */
+          // TODO: Must change logic so that the thread blocks (sleeps) only until a task becomes available
+          // *either* in global queue *or* in another worker's deque. Currently, sleeps til global queue
+          
+          // How to implement: counter or semaphore which is incremented each time a task is submitted to the pool 
+          // (internal or external) and decremented each time a task is executed.
+
+        /* pthread_mutex_lock(&pool->gs_queue_lock);
+          bool gs_queue_locked = true;
 
 
-            /* pthread_mutex_lock(&pool->gs_queue_lock);
-              bool gs_queue_locked = true;
+          while (list_empty(&pool->gs_queue)) { 
+            // wrap in while loop due to possible spurious wake ups
+              pthread_cond_wait(&pool->gs_queue_has_tasks, &pool->gs_queue_lock); 
+          }
 
-              // TODO: change to futures list? contains any available? or have a
-              // counter or semaphore which is incremented each time a task is submitted to the pool (internal or external)
-              // and decremented each time a task is executed.
-              while (list_empty(&pool->gs_queue)) { 
-
-                  pthread_cond_wait(&pool->gs_queue_has_tasks, &pool->gs_queue_lock); // TODO: ?
-              }
-                    NOTE: spurious wakeups - https://stackoverflow.com/questions/8594591/why-does-pthread-cond-wait-have-spurious-wakeups
-                        must re-eval cond upon wakeup [i.e., return from the call]
-
-                  if (pool->shutdown_requested) {   // in while loop?
-                        pthread_mutex_unlock_c(&pool_gs_queue_lock); // change
-                        pthread_exit(NULL);
-                  }
-              }
-              */
-        }
+          if (pool->shutdown_requested) {   // in while loop?
+            pthread_mutex_unlock_c(&pool_gs_queue_lock); // change
+            pthread_exit(NULL);
+          }
+          */
 	}
     return NULL;
 }
