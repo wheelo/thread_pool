@@ -202,6 +202,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         /** THERE IS A DEADLOCK ISSUE HERE (join call) *****/
         // unfortunately it causes gdb to also deadlock...
         pthread_join(*current_worker->thread_id, NULL);
+
         #ifdef DEBUG
             fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
         #endif
