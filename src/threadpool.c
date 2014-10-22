@@ -11,6 +11,16 @@
 #include <semaphore.h> // sem_wait() sem_post()
 #include "list.h"
  
+#define DEBUG // comment out to turn off debug print statements
+
+
+/*******
+ * NOTE: which functions to check for errors (some don't need to)
+ *  check: pthread_create
+ *        pthread_cond_wait() it's helpful to check because it fails with EPERM if the mutex wasn't owned by the thread at the time of the call.
+ *  ignore: pthread_mutex_lock, _mutex_unlock, _cond_signal, _cond_broadcast
+ *******/
+
 /**
  * Holds the threadpool and the current worker to be passed in to function
  * worker_function() so that this function can do future execution and
@@ -82,6 +92,8 @@ struct thread_pool {
 
     struct list workers_list;
     unsigned int number_of_workers;                     
+
+    //list of all acquirable futures (in gsq or stealable), change condition var
 };
 
 /**
@@ -151,7 +163,9 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     pool->shutdown_requested = true;
 
     // Wake up any sleeping threads prior to exit 
-    //pthread_cond_broadcast(&pool->gs_queue_has_tasks); // QUinn: why?
+    //pthread_cond_broadcast_c(&pool->gs_queue_has_tasks); // QUinn: why?
+    // must also release lock (reacquired at wake)
+    // pthread_mutex_unlock_c(&pool-> [cond]);
 
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
@@ -193,7 +207,9 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     	pthread_mutex_lock(&pool->gs_queue_lock);
 	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
 	    // Broadcast to sleeping threads that future is availabe in global submission queue
+        /* TODO: add back. right now debugging without ever making threads sleep 
 	    pthread_cond_broadcast(&pool->gs_queue_has_tasks);
+        */
 	    pthread_mutex_unlock(&pool->gs_queue_lock);
 	} 
     else { // internal submission by worker thread       
@@ -219,7 +235,7 @@ void * future_get(struct future *f)
 {
     if (f == NULL) {  exception_exit("future_get() called with NULL parameter"); }
 
-    if (is_worker) {
+    if (is_worker) { /* internal worker threads */
         pthread_mutex_lock(&f->f_lock);
         FutureStatus future_status = f->status;
         pthread_mutex_unlock(&f->f_lock);
@@ -244,12 +260,11 @@ void * future_get(struct future *f)
         }
         return f->result;
     } 
-    else { 
-        // thread executing this is not a worker thread so it is safe to 
-        // sem_wait()
-        sem_wait(&f->result_sem); // decrement_and_block_if_the_result_is_negative()
+    else { /* external threads */
+        // External threads always block here
+        sem_wait(&f->result_sem);
         // when the value is incremented by worker_function the result will be 
-        // computed
+        // computed and returned
         return f->result;
     }
 }
@@ -268,7 +283,9 @@ void future_free(struct future *f)
  */
 static void * worker_function(void *pool_and_worker2) 
 {
-    fprintf(stdout, ">> in %s(pool_and_worker)\n", "worker_function");
+    #ifdef DEBUG
+        fprintf(stdout, ">> in %s(pool_and_worker)\n", "worker_function");
+    #endif
 
 	is_worker = true; // = thread local variable
     struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) pool_and_worker2;
@@ -323,7 +340,7 @@ static void * worker_function(void *pool_and_worker2)
             continue; // // there might be another future in global submission queue to execute   
 		} 
 
-        if(gs_queue_locked) {
+        if (gs_queue_locked) {
             pthread_mutex_unlock(&pool->gs_queue_lock);
         }
 
@@ -361,7 +378,21 @@ static void * worker_function(void *pool_and_worker2)
             }
 
             // literally no futures to execute or steal so wait
-            pthread_cond_wait(&pool->gs_queue_has_tasks, &pool->gs_queue_lock); // TODO: ?
+            // need to wrap in while loop? or is it ok since within a while anyways?
+            /* pthread_mutex_lock(&pool->gs_queue_lock);
+              bool gs_queue_locked = true;
+              while (list_empty(&pool->gs_queue)) { // TODO: change to futures list
+                  pthread_cond_wait(&pool->gs_queue_has_tasks, &pool->gs_queue_lock); // TODO: ?
+              }
+                    NOTE: spurious wakeups - https://stackoverflow.com/questions/8594591/why-does-pthread-cond-wait-have-spurious-wakeups
+                        must re-eval cond upon wakeup [i.e., return from the call]
+
+                  if (pool->shutdown_requested) {   // in while loop?
+                        pthread_mutex_unlock_c(&pool_gs_queue_lock); // change
+                        pthread_exit(NULL);
+                  }
+              }
+              */
         }
 	}
     return NULL;
