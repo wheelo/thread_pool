@@ -71,8 +71,6 @@ struct future {
     struct thread_pool *p_pool; // must be passed as an parameter in future_get()
                                 // to be able to execute future->task_fp 
 
-    //bool internally_submitted;
-
     struct list_elem gs_queue_elem; // for adding to gs_queue
     struct list_elem deque_elem; // for adding to local deque of each worker
 };
@@ -199,7 +197,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         pthread_join(*current_worker->thread_id, NULL);
 
         #ifdef DEBUG
-            fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
+            fprintf(stdout, ">>> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
         #endif
       
         worker_free(current_worker);
@@ -306,7 +304,7 @@ void * future_get(struct future *f)
 void future_free(struct future *f) 
 {
     if (f == NULL) { exception_exit("future_free() called with NULL parameter"); }
-    //pthread_mutex_destroy(&f->f_lock);
+    //pthread_mutex_destroy(&f->f_lock); Why not working?
     sem_destroy(&f->result_sem);
     free(f);
 }
@@ -382,7 +380,7 @@ static void * worker_function(void *pool_and_worker_arg)
             future->status = COMPLETED;            
 			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
             pthread_mutex_unlock(&future->f_lock);
-
+            // 383
             continue; // // there might be another future in global submission queue to execute   
 		} 
         pthread_mutex_unlock(&pool->gs_queue_lock);
@@ -406,7 +404,7 @@ static void * worker_function(void *pool_and_worker_arg)
                     // now execute this stolen future 
                     pthread_mutex_lock(&stolen_future->f_lock);                
                     stolen_future->status = IN_PROGRESS;
-                    void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp);
+                    void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp); // 409
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
                     sem_post(&stolen_future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
@@ -418,38 +416,8 @@ static void * worker_function(void *pool_and_worker_arg)
             }
         } while (stole_a_task); // if it stole > 1 task, continue stealing by restarting the loop through
                                 // all workers. 
-        
-
-        /* Failing that, the worker thread should block until a task becomes available */
-          // TODO: Must change logic so that the thread blocks (sleeps) only until a task becomes available
-          // *either* in global queue *or* in another worker's deque. Currently, sleeps til global queue
-          
-          // How to implement: counter or semaphore which is incremented each time a task is submitted to the pool 
-          // (internal or external) and decremented each time a task is executed.
-
-        /* pthread_mutex_lock(&pool->gs_queue_lock);
-          bool gs_queue_locked = true;
-
-
-          while (list_empty(&pool->gs_queue)) { 
-            // wrap in while loop due to possible spurious wake ups
-              pthread_cond_wait(&pool->gs_queue_has_tasks, &pool->gs_queue_lock); 
-          }
-
-          if (pool->shutdown_requested) {   // in while loop?
-            pthread_mutex_unlock_c(&pool_gs_queue_lock); // change
-            pthread_exit(NULL);
-          }
-          */
 	}
     return NULL;
-
-    /***** HELGRIND:
-     *  Thread #3: Exiting thread still holds 1 lock
-     *   ==30884==    at 0x401C3E: worker_function (threadpool.c:406)
-
-     * Really not seeing how...
-     ********/
 }
 
 /**
