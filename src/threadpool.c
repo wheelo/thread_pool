@@ -35,7 +35,7 @@ struct thread_pool_and_current_worker {
 
 // private functions for this class that must be declared here to be called below
 static void * worker_function(void *pool_and_worker_arg);
-static void worker_free(struct worker *worker);
+//static void worker_free(struct worker *worker);
 static void exception_exit(char *msg);
 
 /**
@@ -177,23 +177,19 @@ struct thread_pool * thread_pool_new(int nthreads)
  */
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
-    //int rc;
 	assert(pool != NULL);
-    if (pool->shutdown_requested) { // already called
-        //exception_exit("thread_pool_shutdown_and_destroy: called multiple times.\n");
-        fprintf(stdout, "in  %s: : ERROR called > 1 time\n", "thread_pool_shutdown_and_destroy");
+    if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
+        return;
+    }
 
+    if (pool->shutdown_requested) { // already called
         return; 
     } 
     
     pool->shutdown_requested = true;
-
-     /* TODO: will deal with sleep/wake after all other issues fixed */
-        // Wake up any sleeping threads prior to exit 
-        //pthread_cond_broadcast(&pool->gs_queue_has_tasks); // QUinn: why?
-    
-        // must also release lock (reacquired at wake)
-        // pthread_mutex_unlock_c(&pool-> [cond]);
+    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
+        return;
+    }
 
     /* Join */
     struct list_elem *e;
@@ -202,24 +198,18 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         fprintf(stdout, ">> in %s, inside workers_list loop BEFORE JOIN\n", "thread_pool_shutdown_and_destroy");
 
         struct worker *current_worker = list_entry(e, struct worker, elem);
-        if (current_worker == NULL) { 
-            fprintf(stdout, " >> in %s: current_worker list_entry FAIL\n", "thread_pool_shutdown_and_destroy");
-        }
+
         /** THERE IS A DEADLOCK ISSUE HERE (join call) *****/
         // unfortunately it causes gdb to also deadlock...
-        if (pthread_join(*current_worker->thread_id, NULL) != 0) {
-             // NOTE: the value passed to pthread_exit() by the terminating thread is stored in the location 
-              // referenced by value_ptr.
-                fprintf(stdout, " >> in %s: pthread_join FAILS\n", "thread_pool_shutdown_and_destroy");
-        }
+        pthread_join(*current_worker->thread_id, NULL);
         #ifdef DEBUG
             fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
         #endif
       
-        worker_free(current_worker);
+        //worker_free(current_worker);
     }
 
-    if (pthread_mutex_destroy(&pool->gs_queue_lock)) fprintf(stdout, "mutex_destroy : prob. still locked!\n");
+    if (pthread_mutex_destroy(&pool->gs_queue_lock) != 0) { fprintf(stdout, "mutex_destroy : prob. still locked!\n"); }
     // TODO cond vars
     // pthread_cond_destroy(&pool->gs_queue_has_tasks); fprintf(stdout, "cond_destroy : prob. still locked!\n");
     free(pool);
@@ -365,6 +355,18 @@ static void * worker_function(void *pool_and_worker_arg)
             
     /* The worker thread checks three potential locations for futures to execute */
 	while (true) {
+        // check if threadpool has been shutdown
+        pthread_mutex_lock(&pool->gs_queue_lock);
+        bool locked = true;
+        if (pool->shutdown_requested) {
+            pthread_mutex_unlock(&pool->gs_queue_lock);
+            locked = false;
+            pthread_exit(NULL);
+        }
+        if (locked) {
+            pthread_mutex_unlock(&pool->gs_queue_lock);
+        }
+
         /* 1) Checks its own local deque first */
         pthread_mutex_lock(&worker->local_deque_lock);
         /* TODO
@@ -478,13 +480,13 @@ static void * worker_function(void *pool_and_worker_arg)
 /**
  * Free all memory allocated to the worker struct.
  * @param worker = pointer to the worker to free
- */
-static void worker_free(struct worker *worker)
-{
-    assert(worker != NULL);
-    pthread_mutex_destroy(&worker->local_deque_lock);
-    free(worker);
-}
+//  */
+// static void worker_free(struct worker *worker)
+// {
+//     assert(worker != NULL);
+//     pthread_mutex_destroy(&worker->local_deque_lock);
+//     free(worker);
+// }
 
 static void exception_exit(char *msg)
 {
