@@ -190,11 +190,13 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     // --------------------- Initialize Future struct --------------------------
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
     pthread_mutex_init(&p_future->f_lock, NULL);
+    pthread_mutex_lock(&p_future->f_lock);
     p_future->param_for_task_fp = data;
     p_future->task_fp = task; 
     p_future->result = NULL;
     sem_init(&p_future->result_sem, 0, 0);
     p_future->status = NOT_STARTED;
+    pthread_mutex_unlock(&p_future->f_lock);
     // -------------------------------------------------------------------------
 
     fprintf(stdout, ">> in thread_pool_submit(): is_worker = %d\n", is_worker);
@@ -339,22 +341,24 @@ static void * worker_function(void *pool_and_worker_arg)
         // 3) The worker attempts steals a task to work on from the bottom of other threads' deques 
         // iterate through other worker threads' deques
 
-        struct list_elem *e;
-        bool stole_a_task = false;
+        //struct list_elem *e;
+        //bool stole_a_task = false;
         // for each worker in the pool
+        /*
         do {
             for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
                 struct worker *other_worker = list_entry(e, struct worker, elem);
                 // steal task from bottom of their deque, if they have any tasks
                 pthread_mutex_lock(&other_worker->local_deque_lock);
-                // will check its own queue, but it'll be empty, so not terribly inefficient?
+
                 if (!list_empty(&other_worker->local_deque)) {
                     struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
                     pthread_mutex_unlock(&other_worker->local_deque_lock);
                     stole_a_task = true;
                     // now execute this stolen future 
+                    void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp); // data race
+
                     pthread_mutex_lock(&stolen_future->f_lock);                
-                    void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp); // 409
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
                     sem_post(&stolen_future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
@@ -365,6 +369,7 @@ static void * worker_function(void *pool_and_worker_arg)
                 }
             }
         } while (stole_a_task); // if it stole > 1 task, continue stealing by restarting the loop through all workers. 
+        */
 	}
     return NULL;
 }
@@ -372,7 +377,7 @@ static void * worker_function(void *pool_and_worker_arg)
 static void worker_free(struct worker *worker)
 {
     assert(worker != NULL);
-    pthread_mutex_destroy(&worker->local_deque_lock);
+    //pthread_mutex_destroy(&worker->local_deque_lock); // Causing problem when run with helgrind
     free(worker);
 }
 
