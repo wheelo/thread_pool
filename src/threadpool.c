@@ -207,10 +207,11 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         }
         /** THERE IS A DEADLOCK ISSUE HERE (join call) *****/
         // unfortunately it causes gdb to also deadlock...
-        if (pthread_join(*current_worker->thread_id, NULL) != 0) {
+        int join_return_val = pthread_join(*current_worker->thread_id, NULL);
+        if (join_return_val != 0) {
              // NOTE: the value passed to pthread_exit() by the terminating thread is stored in the location 
               // referenced by value_ptr.
-                fprintf(stdout, " >> in %s: pthread_join FAILS\n", "thread_pool_shutdown_and_destroy");
+                fprintf(stdout, " >> in %s: pthread_join FAILS with return value %d\n", "thread_pool_shutdown_and_destroy", join_return_val);
         }
         #ifdef DEBUG
             fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
