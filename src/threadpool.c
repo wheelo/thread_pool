@@ -149,7 +149,10 @@ struct thread_pool * thread_pool_new(int nthreads)
     int i;
     for(i = 0; i < nthreads; i++) {
         struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
-        worker = worker_init(worker, i);
+        worker->thread_id = (pthread_t *)malloc(sizeof(pthread_t));
+        worker->index_of_worker = index_of_worker;
+        list_init(&worker->local_deque); 
+        pthread_mutex_init_c(&worker->local_deque_lock, NULL);
         list_push_back(&pool->workers_list, &worker->elem);
     }
     
@@ -233,9 +236,9 @@ struct future * thread_pool_submit(struct thread_pool *pool,
         pthread_t this_thread_id = pthread_self_c();
         // loop through pool's worker_list to find the worker struct with this thread's tid
 
-        int i;
-        for (i = 0; i < pool->number_of_workers; i++) {
-            struct worker *current_worker = pool->workers + i;
+        struct list_elem *e;
+        for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
+            struct worker *current_worker = list_entry(e, struct worker, elem);
             if (*current_worker->thread_id == this_thread_id) {
                 pthread_mutex_lock_c(&current_worker->local_deque_lock);
                 // internal submissions (futures) added to top of local deque                
@@ -365,9 +368,9 @@ static void * worker_function(void *pool_and_worker2)
             //  threads'" deques.
 
             // iterate through other worker threads' deques
-            int i;
-            for (i = 0; i < pool->number_of_workers; i++) {
-                struct worker *other_worker = pool->workers + i;
+            struct list_elem *e;
+            for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
+                struct worker *other_worker = list_entry(e, struct worker, elem);
 
                 // starting at the bottom through other_worker's local deque
                 // and check if there is an unstarted future to steal and execute
