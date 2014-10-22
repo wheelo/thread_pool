@@ -34,7 +34,7 @@ struct thread_pool_and_current_worker {
 };
 
 // private functions for this class that must be declared here to be called below
-static void * worker_function(void *pool_and_worker);
+static void * worker_function(void *pool_and_worker_arg);
 static void worker_free(struct worker *worker);
 static void exception_exit(char *msg);
 
@@ -109,10 +109,12 @@ struct thread_pool * thread_pool_new(int nthreads)
     //if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
 
 	is_worker = false; // worker_function() sets it to true
-    if (is_worker) {
-        fprintf(stdout, ">> in %s: failed to set is_worker value \n", "thread_pool_new");
+    assert(!is_worker);
+
+    struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
+    if (pool == NULL) {
+        fprintf(stdout, "%s: malloc\n", "thread_pool_new");
     }
-	struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
 
     list_init(&pool->gs_queue);    
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
@@ -131,25 +133,37 @@ struct thread_pool * thread_pool_new(int nthreads)
     int i;
     for(i = 0; i < nthreads; i++) {
         struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
-        worker->thread_id = (pthread_t *)malloc(sizeof(pthread_t));
+        worker->thread_id = (pthread_t *) malloc(sizeof(pthread_t));
+        if (worker == NULL || worker->thread_id == NULL) { 
+            fprintf(stdout, "%s:  malloc!!!!\n", "thread_pool_new");
+        }
         list_init(&worker->local_deque); 
         pthread_mutex_init(&worker->local_deque_lock, NULL);
         list_push_back(&pool->workers_list, &worker->elem);
     }
     
+    /***
+     * THIS
+     * https://stackoverflow.com/questions/863952/passing-structures-as-arguments-while-using-pthread-create
+     * "You're probably creating the structure in the same scope as pthread_create. This structure will no longer be 
+     * valid once that scope is exited."
+     *
+     *****/
     // to be passed as a parameter to worker_function()
-    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) 
+    struct thread_pool_and_current_worker *worker_fn_args = (struct thread_pool_and_current_worker *) 
                 malloc(sizeof(struct thread_pool_and_current_worker));
-    pool_and_worker->pool = pool;
+    worker_fn_args->pool = pool; // set pool
 
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
         struct worker *current_worker = list_entry(e, struct worker, elem);
 
-    	pool_and_worker->worker = current_worker;
-        void *pool_and_worker2 = pool_and_worker;
+    	worker_fn_args->worker = current_worker;  // also set in worker_fn, data race
+        //void *pool_and_worker = pool_and_worker;
 
-        pthread_create(current_worker->thread_id, NULL, worker_function, pool_and_worker2);
+        if (pthread_create(current_worker->thread_id, NULL, worker_function, worker_fn_args) != 0) {
+            fprintf(stdout, "%s: PTHREAD_CREATE ERROR!!!!\n", "pthread_create");
+        } 
     }
 	return pool;
 }
@@ -166,12 +180,10 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     //int rc;
 	assert(pool != NULL);
     if (pool->shutdown_requested) { // already called
-       //exception_exit("thread_pool_shutdown_and_destroy: called multiple times.\n");
-       #ifdef DEBUG
-        fprintf(stdout, "in  %s: : called multiple times or logic error\n", "thread_pool_shutdown_and_destroy");
-       #endif
+        //exception_exit("thread_pool_shutdown_and_destroy: called multiple times.\n");
+        fprintf(stdout, "in  %s: : ERROR called > 1 time\n", "thread_pool_shutdown_and_destroy");
 
-       return; 
+        return; 
     } 
     
     pool->shutdown_requested = true;
@@ -186,16 +198,19 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     /* Join */
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
-        #ifdef DEBUG
-            fprintf(stdout, ">> in %s, inside workers_list loop before join\n", "thread_pool_shutdown_and_destroy");
-        #endif
+        
+        fprintf(stdout, ">> in %s, inside workers_list loop BEFORE JOIN\n", "thread_pool_shutdown_and_destroy");
+
         struct worker *current_worker = list_entry(e, struct worker, elem);
+        if (current_worker == NULL) { 
+            fprintf(stdout, " >> in %s: current_worker list_entry FAIL\n", "thread_pool_shutdown_and_destroy");
+        }
+        /** THERE IS A DEADLOCK ISSUE HERE (join call) *****/
+        // unfortunately it causes gdb to also deadlock...
         if (pthread_join(*current_worker->thread_id, NULL) != 0) {
              // NOTE: the value passed to pthread_exit() by the terminating thread is stored in the location 
               // referenced by value_ptr.
-            #ifdef DEBUG
-                fprintf(stdout, " >> in %s, inside workers_list loop, join fails\n", "thread_pool_shutdown_and_destroy");
-            #endif
+                fprintf(stdout, " >> in %s: pthread_join FAILS\n", "thread_pool_shutdown_and_destroy");
         }
         #ifdef DEBUG
             fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
@@ -230,7 +245,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     // -------------------------------------------------------------------------
 
     #ifdef DEBUG
-    //fprintf(stdout, ">> in thread_pool_submit(): is_worker = %d\n", is_worker);
+        fprintf(stdout, ">> in thread_pool_submit(): is_worker = %d\n", is_worker);
     #endif
 
     // If this thread is not a worker, add future to global queue (external submission)
@@ -266,7 +281,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
 void * future_get(struct future *f) 
 {
-    if (f == NULL) {  exception_exit("future_get() called with NULL parameter"); }
+    assert(f != NULL);
+
 
     if (is_worker) { /* internal worker threads */
         pthread_mutex_lock(&f->f_lock);
@@ -328,19 +344,23 @@ void future_free(struct future *f)
  * This is the logic for how a worker thread decides to execute a 
  * task.
  */
-static void * worker_function(void *pool_and_worker2) 
+static void * worker_function(void *pool_and_worker_arg) 
 {
-        #ifdef DEBUG
-            fprintf(stdout, ">> in %s, first line\n", "worker_function");
-        #endif
+    #ifdef DEBUG
+        fprintf(stdout, ">> in %s, first line\n", "worker_function");
+    #endif
 
 	is_worker = true; // = thread local variable
     if (!is_worker) {
-        fprintf(stdout, ">> in %s: testing value of is_worker after setting \n", "worker_function");
+        fprintf(stdout, ">> in %s: ERROR is_worker after setting \n", "worker_function");
     }
-    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) pool_and_worker2;
+    struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker *) pool_and_worker_arg;
+    assert(pool_and_worker_arg != NULL);
 	struct thread_pool *pool = pool_and_worker->pool;
+    assert(pool != NULL);
+
 	struct worker *worker = pool_and_worker->worker;
+    assert(worker != NULL);
 
             
     /* The worker thread checks three potential locations for futures to execute */
@@ -355,7 +375,6 @@ static void * worker_function(void *pool_and_worker2)
          * Instead, acquire lock, quickly check value, and unlock unless need to keep lock for
          * doing something with the mutex'd object afterwards.
          */
-        //bool worker_deque_locked = true;
 		if (!list_empty(&worker->local_deque)) {
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
@@ -447,6 +466,13 @@ static void * worker_function(void *pool_and_worker2)
           */
 	}
     return NULL;
+
+    /***** HELGRIND:
+     *  Thread #3: Exiting thread still holds 1 lock
+     *   ==30884==    at 0x401C3E: worker_function (threadpool.c:406)
+
+     * Really not seeing how...
+     ********/
 }
 
 /**
