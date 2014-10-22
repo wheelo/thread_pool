@@ -49,7 +49,6 @@ static __thread bool is_worker;
 
 typedef enum FutureStatus_ {
     NOT_STARTED,
-    IN_PROGRESS,
     COMPLETED
 } FutureStatus;
 
@@ -66,7 +65,7 @@ struct future {
     void *result;
     sem_t result_sem; // for if result is finished computing
 
-    FutureStatus status; // NOT_STARTED, IN_PROGRESS, or COMPLETED
+    FutureStatus status; // NOT_STARTED or COMPLETED
 
     struct thread_pool *p_pool; // must be passed as an parameter in future_get()
                                 // to be able to execute future->task_fp 
@@ -355,7 +354,6 @@ static void * worker_function(void *pool_and_worker_arg)
 			pthread_mutex_unlock(&worker->local_deque_lock);
 
             pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?    
-            future->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /* execute future task */
 			future->result = result;
             future->status = COMPLETED;            
@@ -374,14 +372,13 @@ static void * worker_function(void *pool_and_worker_arg)
 			pthread_mutex_unlock(&pool->gs_queue_lock);
             
             pthread_mutex_lock(&future->f_lock);
-            future->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->result = result;
             future->status = COMPLETED;            
 			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
             pthread_mutex_unlock(&future->f_lock);
             // 383
-            continue; // // there might be another future in global submission queue to execute   
+            continue; // there might be another future in global submission queue to execute   
 		} 
         pthread_mutex_unlock(&pool->gs_queue_lock);
 
@@ -403,7 +400,6 @@ static void * worker_function(void *pool_and_worker_arg)
                     stole_a_task = true;
                     // now execute this stolen future 
                     pthread_mutex_lock(&stolen_future->f_lock);                
-                    stolen_future->status = IN_PROGRESS;
                     void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp); // 409
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
