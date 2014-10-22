@@ -29,6 +29,7 @@
  * future stealing logic.
  */
 struct thread_pool_and_current_worker {
+    pthread_mutex_t lock;
 	struct thread_pool *pool;
 	struct worker *worker;
 };
@@ -140,30 +141,25 @@ struct thread_pool * thread_pool_new(int nthreads)
         pthread_mutex_init(&worker->local_deque_lock, NULL);
         list_push_back(&pool->workers_list, &worker->elem);
     }
-    
-    /***
-     * THIS
-     * https://stackoverflow.com/questions/863952/passing-structures-as-arguments-while-using-pthread-create
-     * "You're probably creating the structure in the same scope as pthread_create. This structure will no longer be 
-     * valid once that scope is exited."
-     *
-     *****/
+
     // to be passed as a parameter to worker_function()
     struct thread_pool_and_current_worker *worker_fn_args = (struct thread_pool_and_current_worker *) 
                 malloc(sizeof(struct thread_pool_and_current_worker));
-    worker_fn_args->pool = pool; // set pool
+    pthread_mutex_init(&worker_fn_args->lock, NULL);
+    pthread_mutex_lock(&worker_fn_args->lock);
+    worker_fn_args->pool = pool; 
 
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
         struct worker *current_worker = list_entry(e, struct worker, elem);
 
-    	worker_fn_args->worker = current_worker;  // also set in worker_fn, data race
-        //void *pool_and_worker = pool_and_worker;
+    	worker_fn_args->worker = current_worker;  
 
         if (pthread_create(current_worker->thread_id, NULL, worker_function, worker_fn_args) != 0) {
             fprintf(stdout, "%s: PTHREAD_CREATE ERROR!!!!\n", "pthread_create");
         } 
     }
+    pthread_mutex_unlock(&worker_fn_args->lock);
 	return pool;
 }
 
@@ -309,13 +305,8 @@ void * future_get(struct future *f)
 
 void future_free(struct future *f) 
 {
-<<<<<<< HEAD
     if (f == NULL) { exception_exit("future_free() called with NULL parameter"); }
     //pthread_mutex_destroy(&f->f_lock);
-=======
-    assert(f != NULL);
-    pthread_mutex_destroy(&f->f_lock);
->>>>>>> e92675fb8ff5b5fbb4ea1c7f072584b1ca143bcc
     sem_destroy(&f->result_sem);
     free(f);
 }
@@ -332,13 +323,10 @@ static void * worker_function(void *pool_and_worker_arg)
 
 	is_worker = true; // = thread local variable
     struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker *) pool_and_worker_arg;
-    assert(pool_and_worker_arg != NULL);
+    pthread_mutex_lock(&pool_and_worker->lock);
 	struct thread_pool *pool = pool_and_worker->pool;
-    assert(pool != NULL);
-
 	struct worker *worker = pool_and_worker->worker;
-    assert(worker != NULL);
-
+    pthread_mutex_unlock(&pool_and_worker->lock);
             
     /* The worker thread checks three potential locations for futures to execute */
 	while (true) {
@@ -475,5 +463,8 @@ static void worker_free(struct worker *worker)
     free(worker);
 }
 
-
-
+static void exception_exit(char *msg)
+{
+    fprintf(stderr, "%s\n", msg);
+    exit(EXIT_FAILURE);
+}
