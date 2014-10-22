@@ -11,7 +11,7 @@
 # for benchmarking
 CFLAGS=-Wall -O3 -Werror -Wmissing-prototypes
 # for debugging
-#CFLAGS=-Wall -O0 -g -Werror -Wmissing-prototypes -ggdb3
+#CFLAGS=-Wall -O0 -g -Werror -Wmissing-prototypes
 LDLIBS=-lpthread -lrt
 
 OBJ=threadpool.o list.o threadpool_lib.o
