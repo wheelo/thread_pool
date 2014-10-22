@@ -185,8 +185,9 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                                    void * data)
 {
     fprintf(stdout, "called %s(pool, task, data)\n", "thread_pool_submit");
-
-    assert(pool != NULL && task != NULL);
+    
+    assert(pool != NULL);
+    assert(task != NULL);
     // --------------------- Initialize Future struct --------------------------
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
     pthread_mutex_init(&p_future->f_lock, NULL);
