@@ -13,3 +13,7 @@ threadpool todo:
     ( ) pthread_cond_signal or pthread_cond_broadcast
 ( ) future_get()
 ( ) running driver: https://piazza.com/class/hz79cl74dfv3pf?cid=185
+
+
+( ) add -g to makefile
+( ) add _lib.* files to makefile (still runs?)
