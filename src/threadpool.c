@@ -89,7 +89,7 @@ struct thread_pool {
  */
 struct thread_pool * thread_pool_new(int nthreads) 
 {
-    fprintf(stdout, ">> called %s(%d)\n", "thread_pool_new", nthreads);
+    fprintf(stdout, "> called %s(%d)\n", "thread_pool_new", nthreads);
 	if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
 
 	is_worker = false; // worker_function() sets it to true
@@ -160,7 +160,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
                                                             // stored in the location referenced by value_ptr.
         worker_free(current_worker);
     }
-    
+
     pthread_mutex_destroy(&pool->gs_queue_lock);
     pthread_cond_destroy(&pool->gs_queue_has_tasks);
     free(pool);
@@ -265,15 +265,15 @@ void future_free(struct future *f)
  */
 static void * worker_function(void *pool_and_worker2) 
 {
-    fprintf(stdout, ">>>> in %s(pool_and_worker)\n", "worker_function");
+    fprintf(stdout, ">> in %s(pool_and_worker)\n", "worker_function");
 
 	is_worker = true; // = thread local variable
     struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker*) pool_and_worker2;
 	struct thread_pool *pool = pool_and_worker->pool;
 	struct worker *worker = pool_and_worker->worker;
 
-    fprintf(stdout, ">>>> worker->index_of_worker = %d\n", (int) worker->index_of_worker);
-    fprintf(stdout, ">>>> worker->thread_id = %d\n", (int) *worker->thread_id);
+    fprintf(stdout, ">>> worker->index_of_worker = %d\n", (int) worker->index_of_worker);
+    fprintf(stdout, ">>> worker->thread_id = %d\n", (int) *worker->thread_id);
 
 	while (true) {
         pthread_mutex_lock(&worker->local_deque_lock);

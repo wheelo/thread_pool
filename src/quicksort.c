@@ -117,6 +117,8 @@ struct qsort_task {
 static int  
 qsort_internal_parallel(struct thread_pool * threadpool, struct qsort_task * s)
 {
+    fprintf(stdout, ">>> called %s(threadpool, s)\n", "qsort_internal_parallel");
+
     int * array = s->array;
     int left = s->left;
     int right = s->right;
@@ -158,7 +160,7 @@ static int depth = 3;
 static void 
 qsort_parallel(int *array, int N) 
 {
-    fprintf(stdout, "called %s(array, %d)\n", "qsort_parallel", N);
+    fprintf(stdout, "\n\n>> called %s(array, %d)\n", "qsort_parallel", N);
     struct qsort_task root = {
         .left = 0, .right = N-1, .depth = depth, .array = array
     };
