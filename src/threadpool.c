@@ -35,7 +35,7 @@ struct thread_pool_and_current_worker {
 
 // private functions for this class that must be declared here to be called below
 static void * worker_function(void *pool_and_worker_arg);
-//static void worker_free(struct worker *worker);
+static void worker_free(struct worker *worker);
 static void exception_exit(char *msg);
 
 /**
@@ -104,9 +104,8 @@ struct thread_pool {
  */
 struct thread_pool * thread_pool_new(int nthreads) 
 {
-    //fprintf(stdout, "> called %s(%d)\n", "thread_pool_new", nthreads);
+    fprintf(stdout, "> called %s(%d)\n", "thread_pool_new", nthreads);
 	assert(nthreads > 0);
-    //if (nthreads < 1) { exception_exit("thread_pool_new(): must create at least one worker thread"); }
 
 	is_worker = false; // worker_function() sets it to true
     assert(!is_worker);
@@ -207,7 +206,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
             fprintf(stdout, " >> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
         #endif
       
-        //worker_free(current_worker);
+        worker_free(current_worker);
     }
 
     if (pthread_mutex_destroy(&pool->gs_queue_lock) != 0) { fprintf(stdout, "mutex_destroy : prob. still locked!\n"); }
@@ -274,7 +273,6 @@ void * future_get(struct future *f)
 {
     assert(f != NULL);
 
-
     if (is_worker) { /* internal worker threads */
         pthread_mutex_lock(&f->f_lock);
         //FutureStatus status = f->status;
@@ -282,8 +280,6 @@ void * future_get(struct future *f)
             pthread_mutex_unlock(&f->f_lock);
             return f->result;
         }
-
-
         // Below if statement is for when the threadpool has 1 thread and 
         // multiple futures. You cannot just simply call sem_wait() here
         // because if 1 worker thread calls sem_post() on the first future
@@ -291,28 +287,17 @@ void * future_get(struct future *f)
         // would execute 1 of the 2 generated futures and then deadlock.
         else if (f->status == NOT_STARTED) {
             // Execute task in worker thread      
-            //pthread_mutex_lock(&f->f_lock);    have not released it from prev. lock
-
-            /***
-
-            Quinn: is my logic right here adding IN_PROG? We have to set to IN_PROGRESS somewhere.
-            Can't do it after void *result
-
-            ****/
-
-            f->status = IN_PROGRESS; // <----------- also setting everywhere else
-                                            // just prior to calling result
 
             void *result = (*(f->task_fp))(f->p_pool, f->param_for_task_fp);
-
-
             f->result = result;
             f->status = COMPLETED;
             sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
             pthread_mutex_unlock(&f->f_lock);
             return f->result;
+        } else {
+            pthread_mutex_unlock(&f->f_lock);
+            return f->result;
         }
-        return f->result;
     } 
     else { /* external threads */
         // External threads always block here
@@ -326,7 +311,7 @@ void * future_get(struct future *f)
 void future_free(struct future *f) 
 {
     if (f == NULL) { exception_exit("future_free() called with NULL parameter"); }
-    pthread_mutex_destroy(&f->f_lock);
+    //pthread_mutex_destroy(&f->f_lock);
     sem_destroy(&f->result_sem);
     free(f);
 }
@@ -342,9 +327,6 @@ static void * worker_function(void *pool_and_worker_arg)
     #endif
 
 	is_worker = true; // = thread local variable
-    if (!is_worker) {
-        fprintf(stdout, ">> in %s: ERROR is_worker after setting \n", "worker_function");
-    }
     struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker *) pool_and_worker_arg;
     assert(pool_and_worker_arg != NULL);
 	struct thread_pool *pool = pool_and_worker->pool;
@@ -481,13 +463,13 @@ static void * worker_function(void *pool_and_worker_arg)
 /**
  * Free all memory allocated to the worker struct.
  * @param worker = pointer to the worker to free
-//  */
-// static void worker_free(struct worker *worker)
-// {
-//     assert(worker != NULL);
-//     pthread_mutex_destroy(&worker->local_deque_lock);
-//     free(worker);
-// }
+ */
+static void worker_free(struct worker *worker)
+{
+    assert(worker != NULL);
+    pthread_mutex_destroy(&worker->local_deque_lock);
+    free(worker);
+}
 
 static void exception_exit(char *msg)
 {
