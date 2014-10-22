@@ -68,6 +68,8 @@ struct future {
     struct thread_pool *p_pool; // must be passed as an parameter in future_get()
                                 // to be able to execute future->task_fp 
 
+    //bool internally_submitted;
+
     struct list_elem gs_queue_elem; // for adding to gs_queue
     struct list_elem deque_elem; // for adding to local deque of each worker
 };
@@ -192,7 +194,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
     pthread_mutex_init(&p_future->f_lock, NULL);
     p_future->param_for_task_fp = data;
-    p_future->task_fp = task;
+    p_future->task_fp = task; 
     p_future->result = NULL;
     sem_init(&p_future->result_sem, 0, 0);
     p_future->status = NOT_STARTED;
@@ -237,21 +239,35 @@ void * future_get(struct future *f)
 
     if (is_worker) { /* internal worker threads */
         pthread_mutex_lock(&f->f_lock);
-        FutureStatus future_status = f->status;
-        pthread_mutex_unlock(&f->f_lock);
-
-        if (future_status == COMPLETED) {
+        //FutureStatus status = f->status;
+        if (f->status == COMPLETED) {
+            pthread_mutex_unlock(&f->f_lock);
             return f->result;
         }
+
+
         // Below if statement is for when the threadpool has 1 thread and 
         // multiple futures. You cannot just simply call sem_wait() here
         // because if 1 worker thread calls sem_post() on the first future
         // and the first future generated 2 other futures then the 1 thread
         // would execute 1 of the 2 generated futures and then deadlock.
-        else if (future_status == NOT_STARTED) {
+        else if (f->status == NOT_STARTED) {
             // Execute task in worker thread      
-            pthread_mutex_lock(&f->f_lock);        
+            //pthread_mutex_lock(&f->f_lock);    have not released it from prev. lock
+
+            /***
+
+            Quinn: is my logic right here adding IN_PROG? We have to set to IN_PROGRESS somewhere.
+            Can't do it after void *result
+
+            ****/
+
+            f->status = IN_PROGRESS; // <----------- also setting everywhere else
+                                            // just prior to calling result
+
             void *result = (*(f->task_fp))(f->p_pool, f->param_for_task_fp);
+
+
             f->result = result;
             f->status = COMPLETED;
             sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
@@ -297,16 +313,29 @@ static void * worker_function(void *pool_and_worker2)
 
 	while (true) {
         pthread_mutex_lock(&worker->local_deque_lock);
-        bool worker_deque_locked = true;
 
-		// if there are futures in local deque execute them first
+        /* TODO
+         * May need to remove booleans here -- because you always have to make sure the lock has
+         * been maintained the entire time since its value was last set, or else it could be
+         * invalid at the point when you do something with the value. Would make workers hold on
+         * to locks longer than necessary, or use a possibly invalid boolean to determine logic.
+         * Instead, acquire lock, quickly check value, and unlock unless need to keep lock for
+         * doing something with the mutex'd object afterwards.
+         */
+        //bool worker_deque_locked = true;
+
+		/* if there are futures in local deque execute them first */
 		if (!list_empty(&worker->local_deque)) {
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
             worker_deque_locked = false;
 
-            pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?     
+            pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?    
+
+            f->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);    
+
+
 			future->result = result;
             future->status = COMPLETED;            
 			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
@@ -314,15 +343,11 @@ static void * worker_function(void *pool_and_worker2)
 
             continue; // there might be another future in local deque to execute        
 		} 
+        // 'if' must be false to get to this point. When 'if' true, releases lock. 
+        pthread_mutex_unlock(&worker->local_deque_lock);   // fails with EPERM if not owner
 
-        if(worker_deque_locked) {
-            pthread_mutex_unlock(&worker->local_deque_lock);  
-        }
-
+        /*  else if there are futures in gs_queue execute them second */
         pthread_mutex_lock(&pool->gs_queue_lock);
-        bool gs_queue_locked = true;
-
-        // else if there are futures in gs_queue execute them second 
 		if (!list_empty(&pool->gs_queue)) {
             // "If a worker runs out of tasks, it checks a global submission queue for tasks. If a task
             //  can be found it it, it is executed" from 2.1 of spec
@@ -331,6 +356,8 @@ static void * worker_function(void *pool_and_worker2)
             gs_queue_locked = false;
 
             pthread_mutex_lock(&future->f_lock);
+
+            f->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
             future->result = result;
             future->status = COMPLETED;            
@@ -339,10 +366,8 @@ static void * worker_function(void *pool_and_worker2)
 
             continue; // // there might be another future in global submission queue to execute   
 		} 
-
-        if (gs_queue_locked) {
-            pthread_mutex_unlock(&pool->gs_queue_lock);
-        }
+        // 'if' must be false to get to this point. When 'if' true, releases lock inside the 'if' block.        
+        pthread_mutex_unlock(&pool->gs_queue);
 
         // the local deque and global submission are empty
 		if (true) { // TODO: consider removing later?
@@ -365,6 +390,8 @@ static void * worker_function(void *pool_and_worker2)
 
                     // now execute this stolen future 
                     pthread_mutex_lock(&stolen_future->f_lock);
+                    
+                    f->status = IN_PROGRESS;
                     void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp);
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
@@ -404,7 +431,9 @@ static void * worker_function(void *pool_and_worker2)
  */
 static void worker_free(struct worker *worker)
 {
-    if (worker == NULL) { exception_exit("worker_free() you cannot pass NULL\n"); }
+    if (worker == NULL) { 
+        exception_exit("worker_free() you cannot pass NULL\n"); 
+    }
     pthread_mutex_destroy(&worker->local_deque_lock);
     free(worker);
 }
