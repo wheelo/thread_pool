@@ -15,8 +15,13 @@
 #include "list.h"
 #define DEBUG // comment out to turn off debug print statements
 
-/* Wrapper functions with error checking for pthreads and semaphores */
 
+/* Helper functions */
+void set_shutting_down_flag(struct thread_pool* pool, bool shutdown_was_requested);
+bool is_shutting_down(struct thread_pool* pool);
+
+
+/* Wrapper functions with error checking for pthreads and semaphores */
 /* POSIX Threads (pthread.h) */
 // Thread Routines
 static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
@@ -108,9 +113,12 @@ struct thread_pool {
     struct list/*<Future>*/ gs_queue; // global submission queue
     pthread_mutex_t gs_queue_lock;      
    
-    bool shutdown_requested; 
+    bool shutting_down;     // threadpool_shutdown_and_destroy() has been called        
+    pthread_mutex_t shutting_down_lock; // lock to synchronize the shutting_down flag
 
     struct list workers_list;
+    pthread_mutex_t workers_list_lock;
+
     unsigned int num_workers;     // number of worker threads in the threadpool                
 };
 
@@ -135,10 +143,12 @@ struct thread_pool * thread_pool_new(int nthreads)
     
     /* don't delete
      pthread_cond_init(&pool->gs_queue_has_tasks, NULL); */
-    pool->shutdown_requested = false;
+    pthread_mutex_init_c(&pool->shutting_down_lock, NULL);
+    set_shutting_down_flag(pool, false); // synchronized
     pool->num_workers = nthreads;
 
     // Initialize workers list
+    pthread_mutex_init_c(&pool->workers_list_lock, NULL);
     list_init(&pool->workers_list);
     int i;
     for(i = 0; i < nthreads; i++) {
@@ -183,12 +193,13 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 {
     fprintf(stdout, "[Thread ID: %lu] in %s():  ENTER thread_pool_shutdown_and_destroy\n", (unsigned long)pthread_self(), "thread_pool_shutdown_and_destroy");
 	assert(pool != NULL);
-    assert(!pool->shutdown_requested); // logic or client error if so [called twice]
+    assert(!is_shutting_down(pool));    /* should not be called twice. If it is, it is an error either
+                                          in our logic or in how the client is calling it. */
 
     
     pthread_mutex_lock_c(&pool->gs_queue_lock);
 
-    pool->shutdown_requested = true;
+    set_shutting_down_flag(pool, true); // synchronized
     pthread_mutex_unlock_c(&pool->gs_queue_lock);
 
     // Join all worker threads
@@ -340,7 +351,7 @@ static void * worker_function(void *pool_and_worker_arg)
     	while (true) {
             // check if threadpool has been shutdown
             pthread_mutex_lock_c(&pool->gs_queue_lock);
-            if (pool->shutdown_requested) {
+            if (is_shutting_down(pool)) {
                 pthread_mutex_unlock_c(&pool->gs_queue_lock);
                 fprintf(stdout, "[Thread ID: %lu] in %s(): in while(true) shutdown; Num_workers after exit will be %d\n",
                             (unsigned long)pthread_self(), "worker_function", pool->num_workers - 1);
@@ -471,6 +482,37 @@ static void * worker_function(void *pool_and_worker_arg)
 
     return NULL;     /*     <----- PROBLEM ? */
 }
+
+
+
+
+
+/* Sets the shutting_down flag on or off in a synchronized way 
+ * @param shutdown_was_requested - true or false 
+ */
+void set_shutting_down_flag(struct thread_pool* pool, bool shutting_down_value) 
+{
+    assert(pool != NULL);
+    pthread_mutex_lock_c(&pool->shutting_down_lock);
+    pool->shutting_down = shutting_down_value; 
+    pthread_mutex_unlock_c(&pool->shutting_down_lock);
+}
+
+
+/* Checks whether the shutting_down flag is set to on or off in a synchronized way 
+ * @param pool A pointer to the pool
+ * @return true is shutting_down is set to true
+ */
+bool is_shutting_down(struct thread_pool* pool)
+{
+    assert(pool != NULL);
+    pthread_mutex_lock_c(&pool->shutting_down_lock);
+    bool flag = pool->shutting_down;
+    pthread_mutex_unlock_c(&pool->shutting_down_lock);
+    return flag;
+}
+
+
 
 
 /***************************************************************************
