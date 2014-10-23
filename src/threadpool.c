@@ -102,7 +102,7 @@ static void decrement_num_workers(struct thread_pool* pool);
 static int get_number_of_workers(struct thread_pool* pool);
 static void set_num_workers(struct thread_pool* pool, int num_workers);
 
-struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool);
+static struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool);
 static void error_exit(char *msg, int err_code);
 
 
@@ -235,6 +235,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 
         /* TODO if not here, need to add somewhere else */
         /* ????? */
+        remove_calling_thread_from_workers_list(pool);
         worker_free(current_worker);
         // decrement number of workers since one has terminated via joining.
         fprintf(stdout, "[Thread ID: %lu] in %s(): Num_workers after worker_free will be %d\n", (unsigned long)pthread_self(), 
@@ -366,22 +367,17 @@ static void * worker_function(void *pool_and_worker_arg)
             
     // The worker thread checks three potential locations for futures to execute 
     fprintf(stdout, "[Thread ID: %lu] in %s(): if shutdown_requested while(true) \n", (unsigned long)pthread_self(), "worker_function");
-    	while (true) {
-            // check if threadpool has been shutdown
-            pthread_mutex_lock_c(&pool->gs_queue_lock);
-            if (is_shutting_down(pool)) {
-                pthread_mutex_unlock_c(&pool->gs_queue_lock);
-                fprintf(stdout, "[Thread ID: %lu] in %s(): in while(true) shutdown; Num_workers after exit will be %d\n",
+    while (true) {
+        // check if threadpool has been shutdown
+        if (is_shutting_down(pool)) {
+            fprintf(stdout, "[Thread ID: %lu] in %s(): in while(true) shutdown; Num_workers after exit will be %d\n",
                             (unsigned long)pthread_self(), "worker_function", get_number_of_workers(pool));
-
-                decrement_num_workers(pool);
-                /* TODO: remove worker from workers list before it exits */
-                /* TODO: free_worker(worker); */
-                pthread_exit(NULL);
-
-            } else {
-                pthread_mutex_unlock_c(&pool->gs_queue_lock);
-            }
+            remove_calling_thread_from_workers_list(pool);
+            decrement_num_workers(pool);
+            /* TODO: remove worker from workers list before it exits */
+            /* TODO: free_worker(worker); */
+            pthread_exit(NULL);
+        }
         
 
         /* 1) Checks its own local deque first */
@@ -578,7 +574,7 @@ static void worker_free(struct worker *worker)
  * @param pool The thread_pool
  * @return A pointer to the worker that was removed from the list, or NULL if not found
  */
- struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool)
+ static struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool)
  {
     assert(pool != NULL);
     assert(&pool->workers_list != NULL);
@@ -600,8 +596,11 @@ static void worker_free(struct worker *worker)
             break;
         }
     }
+    pthread_mutex_unlock_c(&pool->workers_list_lock);
     // if was found, return pointer to the worker, otherwise exit (error in logic of how this is called)
-    if (found) { return removed_worker; }
+    if (found) {
+        return removed_worker; 
+    }
     else { 
         fprintf(stderr, "The worker for the calling thread was not found in remove_calling_thread_from_workers_list()!"
           " Some logical error! Investigate!\n"); 
