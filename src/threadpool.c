@@ -59,7 +59,6 @@ struct thread_pool_and_current_worker {
 // private functions for this class that must be declared here to be called below
 static void * worker_function(void *pool_and_worker_arg);
 static void worker_free(struct worker *worker);
-static void exception_exit(char *msg);
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -209,10 +208,13 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     // pthread_cond_destroy(&pool->gs_queue_has_tasks); fprintf(stdout, "cond_destroy : prob. still locked!\n");
         fprintf(stdout, ">> in %s, inside workers_list loop BEFORE JOIN\n", "thread_pool_shutdown_and_destroy");
         struct worker *current_worker = list_entry(e, struct worker, elem);
-        pthread_join(*current_worker->thread_id, NULL);
+        int err;
+        err = pthread_join(*current_worker->thread_id, NULL);
+        if (err != 0) { 
+            fprintf(stdout, ">>> in %s, pthread_join failure\n", "thread_pool_shutdown_and_destroy");
+        }
         fprintf(stdout, ">>> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
         worker_free(current_worker);
-    }
 
     pthread_mutex_destroy_c(&pool->gs_queue_lock);
     free(pool);
@@ -350,7 +352,6 @@ static void * worker_function(void *pool_and_worker_arg)
             
 
             pthread_mutex_lock_c(&future->f_lock);
-            future->status = IN_PROGRESS;
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /* execute future task */
 			future->result = result;
             future->status = COMPLETED;            
@@ -398,7 +399,7 @@ static void * worker_function(void *pool_and_worker_arg)
                     stole_a_task = true;
                     // now execute this stolen future 
                     pthread_mutex_lock_c(&stolen_future->f_lock);                
-                    stolen_future->status = IN_PROGRESS;
+
                     void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp);
                     stolen_future->result = result;
                     stolen_future->status = COMPLETED;            
@@ -596,7 +597,8 @@ static void sem_wait_c(sem_t *sem)
     if (rc < 0) {
         error_exit("sem_wait", rc);
     }
-=======
+}
+
 static void worker_free(struct worker *worker)
 {
     assert(worker != NULL);
@@ -604,9 +606,3 @@ static void worker_free(struct worker *worker)
     free(worker);
 }
 
-static void exception_exit(char *msg)
-{
-    fprintf(stderr, "%s\n", msg);
-    exit(EXIT_FAILURE);
->>>>>>> ebbd22c0a192c312be88e0ece76c08cfc29f5915
-}
