@@ -287,7 +287,7 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
 
 void * future_get(struct future *f) 
 {
-    fprintf(stdout, "[Thread ID: %lu] in %s():", (unsigned long)pthread_self(), "thread_pool_shutdown_and_destroy");
+    fprintf(stdout, "[Thread ID: %lu] in %s():\n", (unsigned long)pthread_self(), "future_get");
     assert(f != NULL);
     if (is_worker) { /* internal worker threads */
         pthread_mutex_lock_c(&f->f_lock);
@@ -528,7 +528,13 @@ static void worker_free(struct worker *worker)
  // void remove_calling_thread_from_workers_list(struct thread_pool *pool)
  // {
  //    assert(pool != NULL);
+ //    assert(pool->workers_list != NULL);
+ //    assert(pool->workers_list_lock != NULL);
+ //    pthread_t calling_tid = pthread_self();
  //    pthread_mutex_lock_c(&pool->workers_list_lock);
+ //    struct list_elem *e;
+ //    for (e = list_begin(&foo_list); e != list_end (&foo_list);
+ //           e = list_next (e))
 
  //    .... TODO
  // }
