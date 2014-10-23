@@ -78,7 +78,7 @@ struct thread_pool {
     pthread_mutex_t gs_queue_lock;
    
     bool shutdown_requested; 
-    sem_t number_workers_to_shut_down;
+    pthread_barrier_t barrier;
 
     unsigned int number_of_workers;                     
     struct list workers_list;
@@ -102,8 +102,9 @@ struct thread_pool * thread_pool_new(int nthreads)
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
     
     pool->shutdown_requested = false;
+    pthread_barrier_init(&pool->barrier, NULL, nthreads + 1);
+
     pool->number_of_workers = nthreads;
-    sem_init(&pool->number_workers_to_shut_down, 0, -nthreads + 1);
 
     // Initialize workers list
     list_init(&pool->workers_list);
@@ -158,10 +159,11 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     } else {
         pool->shutdown_requested = true; 
     }
-    // we want the semaphore number_workers_to_shut_down's value = 1
-    //sem_wait(&pool->number_workers_to_shut_down); 
-    // now number_workers_to_shut_down's value = 0 but the remaining code in this function can safely execute
     pthread_mutex_unlock(&pool->gs_queue_lock);
+
+    // rendezvous point = the thread executing the code here doesn't continue until nthreads # of workers 
+    // have reached this point
+    pthread_barrier_wait(&pool->barrier);
 
     // Join all worker threads
     struct list_elem *e;
@@ -174,7 +176,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         worker_free(current_worker);
     }
 
-    if (pthread_mutex_destroy(&pool->gs_queue_lock) != 0) { fprintf(stdout, "mutex_destroy : prob. still locked!\n"); }
+    if (pthread_mutex_destroy(&pool->gs_queue_lock) != 0) { fprintf(stdout, "pthread_mutex_destroy() error prob. still locked!\n"); }
     free(pool);
     return;
 }
@@ -250,8 +252,8 @@ void * future_get(struct future *f)
             void *result = (*(f->task_fp))(f->p_pool, f->param_for_task_fp);
             f->result = result;
             f->status = COMPLETED;
-            sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
             pthread_mutex_unlock(&f->f_lock);
+            sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
             return f->result;
         } else {
             pthread_mutex_unlock(&f->f_lock);
@@ -270,7 +272,7 @@ void * future_get(struct future *f)
 void future_free(struct future *f) 
 {
     if (f == NULL) { exception_exit("future_free() called with NULL parameter"); }
-    //pthread_mutex_destroy(&f->f_lock); Why not working?
+    pthread_mutex_destroy(&f->f_lock); //Why not working?
     sem_destroy(&f->result_sem);
     free(f);
 }
@@ -297,9 +299,11 @@ static void * worker_function(void *pool_and_worker_arg)
         bool locked = true;
         if (pool->shutdown_requested) {
             pthread_mutex_unlock(&pool->gs_queue_lock);
-            locked = false;
+            locked = false;    
+
+            pthread_barrier_wait(&pool->barrier);
+
             fprintf(stdout, ">>> about to call %s(NULL)\n", "pthread_exit");
-            //sem_post(&pool->number_workers_to_shut_down); 
             pthread_exit(NULL);
         }
         if (locked) {
@@ -309,15 +313,17 @@ static void * worker_function(void *pool_and_worker_arg)
         // 1) Checks its own local deque first 
         pthread_mutex_lock(&worker->local_deque_lock);
 		if (!list_empty(&worker->local_deque)) {
+            fprintf(stdout, ">>>> about to execute future in local deque\n");
 			struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
 			pthread_mutex_unlock(&worker->local_deque_lock);
 
-            pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?    
-            void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /// execute future task 
+            void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /// execute future task  
+
+            pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?   
 			future->result = result;
             future->status = COMPLETED;            
-			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
-            pthread_mutex_unlock(&future->f_lock);   
+            pthread_mutex_unlock(&future->f_lock);  
+            sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any() 
 
             continue; // there might be another future in local deque to execute        
 		} 
@@ -327,15 +333,13 @@ static void * worker_function(void *pool_and_worker_arg)
         // 2) Check for futures in global threadpool queue 
         pthread_mutex_lock(&pool->gs_queue_lock);
 		if (!list_empty(&pool->gs_queue)) {
+            fprintf(stdout, ">>>> about to steal future from global submission queue\n");
 			struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
 			pthread_mutex_unlock(&pool->gs_queue_lock);
-            
-            pthread_mutex_lock(&future->f_lock);
-            void *result = (*(future->task_fp))(pool, future->param_for_task_fp);
-            future->result = result;
-            future->status = COMPLETED;            
-			sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
-            pthread_mutex_unlock(&future->f_lock);
+
+            pthread_mutex_lock(&worker->local_deque_lock);
+            list_push_front(&worker->local_deque, &future->deque_elem);
+            pthread_mutex_unlock(&worker->local_deque_lock);
             continue; // there might be another future in global submission queue to execute   
 		} 
         pthread_mutex_unlock(&pool->gs_queue_lock);
@@ -353,6 +357,7 @@ static void * worker_function(void *pool_and_worker_arg)
             pthread_mutex_lock(&other_worker->local_deque_lock);
 
             if (!list_empty(&other_worker->local_deque)) {
+                fprintf(stdout, ">>>> about to steal future from another worker's deque\n");
                 struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
                 pthread_mutex_unlock(&other_worker->local_deque_lock);
                 stole_a_future = true;
