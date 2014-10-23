@@ -75,12 +75,11 @@ struct worker {
 
 struct thread_pool {
     struct list/*<Future>*/ gs_queue; // global submission queue
-    pthread_mutex_t gs_queue_lock;      
+    pthread_mutex_t gs_queue_lock;
    
     bool shutdown_requested; 
-
-    struct list workers_list;
     unsigned int number_of_workers;                     
+    struct list workers_list;
 };
 
 /**
@@ -99,9 +98,6 @@ struct thread_pool * thread_pool_new(int nthreads)
 
     list_init(&pool->gs_queue);    
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
-
-    // Initialize condition variable used to broadcast to worker threads that 
-    // tasks are available in the global submission queue 
     
     pool->shutdown_requested = false;
     pool->number_of_workers = nthreads;
@@ -176,7 +172,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     }
 
     if (pthread_mutex_destroy(&pool->gs_queue_lock) != 0) { fprintf(stdout, "mutex_destroy : prob. still locked!\n"); }
-    free(pool);
+    //free(pool);
     return;
 }
 
@@ -339,38 +335,29 @@ static void * worker_function(void *pool_and_worker_arg)
 		} 
         pthread_mutex_unlock(&pool->gs_queue_lock);
 
-        // 3) The worker attempts steals a task to work on from the bottom of other threads' deques 
-        // iterate through other worker threads' deques
-
-        //struct list_elem *e;
-        //bool stole_a_task = false;
-        // for each worker in the pool
-        /*
-        do {
-            for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
-                struct worker *other_worker = list_entry(e, struct worker, elem);
-                // steal task from bottom of their deque, if they have any tasks
-                pthread_mutex_lock(&other_worker->local_deque_lock);
-
-                if (!list_empty(&other_worker->local_deque)) {
-                    struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
-                    pthread_mutex_unlock(&other_worker->local_deque_lock);
-                    stole_a_task = true;
-                    // now execute this stolen future 
-                    void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp); // data race
-
-                    pthread_mutex_lock(&stolen_future->f_lock);                
-                    stolen_future->result = result;
-                    stolen_future->status = COMPLETED;            
-                    sem_post(&stolen_future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
-                    pthread_mutex_unlock(&stolen_future->f_lock);      
-                }
-                else {
-                    pthread_mutex_unlock(&other_worker->local_deque_lock);
-                }
+        // 3) The worker attempts to steal a future to work on from the bottom of other threads' deques 
+        struct list_elem *e;
+        bool stole_a_future = false;
+        for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
+            if (stole_a_future) {
+                break;
             }
-        } while (stole_a_task); // if it stole > 1 task, continue stealing by restarting the loop through all workers. 
-        */
+            struct worker *other_worker = list_entry(e, struct worker, elem);
+
+            // steal future from bottom of their deque, if they have any futures
+            pthread_mutex_lock(&other_worker->local_deque_lock);
+
+            if (!list_empty(&other_worker->local_deque)) {
+                struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
+                pthread_mutex_unlock(&other_worker->local_deque_lock);
+                stole_a_future = true;
+
+                // now add this stolen future to the current worker's local deque
+                list_push_front(&worker->local_deque, &stolen_future->deque_elem);
+            } else {
+                pthread_mutex_unlock(&other_worker->local_deque_lock);
+            }
+        }
 	}
     return NULL;
 }
