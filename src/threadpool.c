@@ -78,6 +78,8 @@ struct thread_pool {
     pthread_mutex_t gs_queue_lock;
    
     bool shutdown_requested; 
+    sem_t number_workers_to_shut_down;
+
     unsigned int number_of_workers;                     
     struct list workers_list;
 };
@@ -101,6 +103,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     
     pool->shutdown_requested = false;
     pool->number_of_workers = nthreads;
+    sem_init(&pool->number_workers_to_shut_down, 0, nthreads);
 
     // Initialize workers list
     list_init(&pool->workers_list);
@@ -146,6 +149,8 @@ struct thread_pool * thread_pool_new(int nthreads)
  */
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
+    fprintf(stdout, "> called %s(pool)\n", "thread_pool_shutdown_and_destroy");
+
 	assert(pool != NULL);
     if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
         return;
@@ -172,7 +177,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     }
 
     if (pthread_mutex_destroy(&pool->gs_queue_lock) != 0) { fprintf(stdout, "mutex_destroy : prob. still locked!\n"); }
-    //free(pool);
+    free(pool);
     return;
 }
 
@@ -228,7 +233,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 
 void * future_get(struct future *f) 
 {
-    assert(f != NULL);
+    fprintf(stdout, "> called %s(f)\n", "future_get");
 
     if (is_worker) { // internal worker threads
         pthread_mutex_lock(&f->f_lock);
