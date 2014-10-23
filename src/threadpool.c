@@ -111,7 +111,7 @@ struct thread_pool {
     bool shutdown_requested; 
 
     struct list workers_list;
-    unsigned int number_of_workers;                     
+    unsigned int num_workers;     // number of worker threads in the threadpool                
 };
 
 /**
@@ -136,7 +136,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     /* don't delete
      pthread_cond_init(&pool->gs_queue_has_tasks, NULL); */
     pool->shutdown_requested = false;
-    pool->number_of_workers = nthreads;
+    pool->num_workers = nthreads;
 
     // Initialize workers list
     list_init(&pool->workers_list);
@@ -205,10 +205,15 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         if (pthread_join(*current_worker->thread_id, NULL) != 0) {
             fprintf(stdout, ">> in %s, PTHREAD_JOIN FAILED \n", "thread_pool_shutdown_and_destroy");
         }
-      
+
         /* TODO if not here, need to add somewhere else */
         /* ????? */
         worker_free(current_worker);
+        // decrement number of workers since one has terminated via joining.
+        fprintf(stdout, "%s: in while(true) shutdown: pthread_exit(): "
+                    "Num_workers after exit will be %d\n", "worker_function", pool->num_workers - 1);
+        pool->num_workers--;
+
     }
 
     pthread_mutex_destroy_c(&pool->gs_queue_lock);
@@ -340,8 +345,14 @@ static void * worker_function(void *pool_and_worker_arg)
             pthread_mutex_lock_c(&pool->gs_queue_lock);
             if (pool->shutdown_requested) {
                 pthread_mutex_unlock_c(&pool->gs_queue_lock);
-                fprintf(stdout, "%s: in while(true) shutdown: pthread_exit \n", "worker_function");    
+                fprintf(stdout, "%s: in while(true) shutdown: pthread_exit(): "
+                    "Num_workers after exit will be %d\n", "worker_function", pool->num_workers - 1);
+                
+
+                pool->num_workers--;
+                /* TODO: free_worker(worker); */
                 pthread_exit(NULL);
+
             } else {
                 pthread_mutex_unlock_c(&pool->gs_queue_lock);
             }
@@ -369,7 +380,9 @@ static void * worker_function(void *pool_and_worker_arg)
         pthread_mutex_unlock_c(&worker->local_deque_lock);   // fails with EPERM if not owner
 
         /* 2) Check for futures in global threadpool queue  */
-        fprintf(stdout, "%s: (2) Check Global Queue \n", "worker_function");        
+        fprintf(stdout, "%s: (2) Check Global Queue \n", "worker_function");     
+
+        /** THIS MUTEX RETURNING EINVAL **/  
         pthread_mutex_lock_c(&pool->gs_queue_lock);
     	if (!list_empty(&pool->gs_queue)) {
             fprintf(stdout, "%s: (2) Check Global Queue--->  NOT EMPTY\n", "worker_function");        
@@ -392,6 +405,7 @@ static void * worker_function(void *pool_and_worker_arg)
         // iterate through other worker threads' deques
         struct list_elem *e;
         bool stole_a_task = false;
+
         // for each worker in the pool
         do {
             fprintf(stdout, "%s: (3) Steal: DO \n", "worker_function");        
@@ -401,6 +415,10 @@ static void * worker_function(void *pool_and_worker_arg)
                 /* ONLY STEAL AT MOST ONE! AND MAYBE TRY JUST ADDING IT TO LOCAL DEQUE, NOT EXECUTING IT */
                 struct worker *other_worker = list_entry(e, struct worker, elem);
                 // steal task from bottom of their deque, if they have any tasks
+
+                /******** THIS IS RETURNING EINVAL (22) - Invalid Argument (Sometimes) 
+                          because exiting workers are not being removed from the queue?
+                          Or prevent invalid checking by maxing to pool->num_workers *********/
                 pthread_mutex_lock_c(&other_worker->local_deque_lock);
                 // will check its own queue, but it'll be empty, so not terribly inefficient?
                 if (!list_empty(&other_worker->local_deque)) {
@@ -468,7 +486,7 @@ static void * worker_function(void *pool_and_worker_arg)
 static void error_exit(char *msg, int err_code)
 {
 //    fprintf(stderr, "%s: returned error code: %s\n", msg, strerror(err_code));
-    fprintf(stderr, "/ ------------------  %s: returned error code: %d  ------------------ /n", msg, err_code);
+    fprintf(stderr, "\n\n / -----------------------------  %s: returned error code: %d  -----------------------------/ \n\n", msg, err_code);
     exit(EXIT_FAILURE);
 }
 
