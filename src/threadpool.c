@@ -181,42 +181,34 @@ struct thread_pool * thread_pool_new(int nthreads)
 void thread_pool_shutdown_and_destroy(struct thread_pool *pool) 
 {
 	assert(pool != NULL);
-    assert(!pool->shutdown_requested); // logic or client error if so
-    pthread_mutex_lock_c(&pool->gs_queue_lock);
+    assert(!pool->shutdown_requested); // logic or client error if so [called twice]
+
     
+    pthread_mutex_lock_c(&pool->gs_queue_lock);
+
     pool->shutdown_requested = true;
     pthread_mutex_unlock_c(&pool->gs_queue_lock);
 
     // Join all worker threads
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
-        
+        fprintf(stdout, ">> in %s, in join all workers loop\n", "thread_pool_shutdown_and_destroy");
         struct worker *current_worker = list_entry(e, struct worker, elem);
-
         // unfortunately it causes gdb to also deadlock...
+
+        assert(current_worker != NULL);
+        assert(*current_worker->thread_id != 0);
+
         pthread_join_c(*current_worker->thread_id, NULL);
-        #ifdef DEBUG
-            fprintf(stdout, " >> in %s,  join success\n", "thread_pool_shutdown_and_destroy");
-        #endif
       
         /* TODO if not here, need to add somewhere else */
-        //worker_free(current_worker);
+        /* ????? */
+        worker_free(current_worker);
     }
 
     pthread_mutex_destroy_c(&pool->gs_queue_lock);
     // TODO cond vars
     // pthread_cond_destroy(&pool->gs_queue_has_tasks); fprintf(stdout, "cond_destroy : prob. still locked!\n");
-        fprintf(stdout, ">> in %s, inside workers_list loop BEFORE JOIN\n", "thread_pool_shutdown_and_destroy");
-        struct worker *current_worker = list_entry(e, struct worker, elem);
-        int err;
-        err = pthread_join(*current_worker->thread_id, NULL);
-        if (err != 0) { 
-            fprintf(stdout, ">>> in %s, pthread_join failure\n", "thread_pool_shutdown_and_destroy");
-        }
-        fprintf(stdout, ">>> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
-        worker_free(current_worker);
-
-    pthread_mutex_destroy_c(&pool->gs_queue_lock);
     free(pool);
     return;
 }
