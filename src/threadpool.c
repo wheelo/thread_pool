@@ -16,40 +16,6 @@
 #define DEBUG // comment out to turn off debug print statements
 
 
-/* Helper functions */
-static void set_shutting_down_flag(struct thread_pool* pool, bool shutdown_was_requested);
-static bool is_shutting_down(struct thread_pool* pool);
-
-
-/* Wrapper functions with error checking for pthreads and semaphores */
-/* POSIX Threads (pthread.h) */
-// Thread Routines
-static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
-                      void *(*start_routine)(void *), void *arg);
-//static void pthread_join_c(pthread_t thread, void **value_ptr);
-static pthread_t pthread_self_c(void);
-// Mutex Routines
-static void pthread_mutex_destroy_c(pthread_mutex_t *mutex);
-static void pthread_mutex_init_c(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr);
-static void pthread_mutex_lock_c(pthread_mutex_t *mutex);
-static void pthread_mutex_unlock_c(pthread_mutex_t *mutex);
-// Condition Variable Routines 
-/*
-static void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr);
-static void pthread_cond_destroy_c(pthread_cond_t *cond);
-static void pthread_cond_broadcast_c(pthread_cond_t *cond);
-static void pthread_cond_wait_c(pthread_cond_t *cond, pthread_mutex_t *mutex);
-*/
-/* Semaphores (semaphore.h) */
-static void sem_init_c(sem_t *sem, int pshared, unsigned int value);
-static void sem_destroy_c(sem_t *sem);
-static void sem_post_c(sem_t *sem);
-static void sem_wait_c(sem_t *sem);
-
-
-/****************/
-
-
 /**
  * Holds the threadpool and the current worker to be passed in to function
  * worker_function() so that this function can do future execution and
@@ -57,13 +23,9 @@ static void sem_wait_c(sem_t *sem);
  */
 struct thread_pool_and_current_worker {
     pthread_mutex_t lock;
-	struct thread_pool *pool;
-	struct worker *worker;
+    struct thread_pool *pool;
+    struct worker *worker;
 };
-
-// private functions for this class that must be declared here to be called below
-static void * worker_function(void *pool_and_worker_arg);
-static void worker_free(struct worker *worker);
 
 /**
  * Each thread has this local variable. Even though it is declared like a 
@@ -77,6 +39,7 @@ typedef enum FutureStatus_ {
     NOT_STARTED,
     COMPLETED
 } FutureStatus;
+
 
 /**
  * Represents a task that needs to be done. Contains fields need to execute
@@ -119,8 +82,60 @@ struct thread_pool {
     struct list workers_list;
     pthread_mutex_t workers_list_lock;
 
-    unsigned int num_workers;     // number of worker threads in the threadpool                
+    unsigned int num_workers;     // number of worker threads in the threadpool              
+    pthread_mutex_t num_workers_lock;  
 };
+
+
+/* Helper functions */
+static void set_shutting_down_flag(struct thread_pool* pool, bool shutdown_was_requested);
+static bool is_shutting_down(struct thread_pool* pool);
+static void set_shutting_down_flag(struct thread_pool* pool, bool shutting_down_value);
+// private functions for this class that must be declared here to be called below
+static void * worker_function(void *pool_and_worker_arg);
+static void worker_free(struct worker *worker);
+
+static bool is_shutting_down(struct thread_pool* pool);
+
+/* TODO:  For debugging, won't really need */
+static void decrement_num_workers(struct thread_pool* pool);
+static int get_number_of_workers(struct thread_pool* pool);
+static void set_num_workers(struct thread_pool* pool, int num_workers);
+
+struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool);
+static void error_exit(char *msg, int err_code);
+
+
+/* Wrapper functions with error checking for pthreads and semaphores */
+/* POSIX Threads (pthread.h) */
+// Thread Routines
+static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
+                      void *(*start_routine)(void *), void *arg);
+//static void pthread_join_c(pthread_t thread, void **value_ptr);
+static pthread_t pthread_self_c(void);
+// Mutex Routines
+static void pthread_mutex_destroy_c(pthread_mutex_t *mutex);
+static void pthread_mutex_init_c(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr);
+static void pthread_mutex_lock_c(pthread_mutex_t *mutex);
+static void pthread_mutex_unlock_c(pthread_mutex_t *mutex);
+// Condition Variable Routines 
+/*
+static void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr);
+static void pthread_cond_destroy_c(pthread_cond_t *cond);
+static void pthread_cond_broadcast_c(pthread_cond_t *cond);
+static void pthread_cond_wait_c(pthread_cond_t *cond, pthread_mutex_t *mutex);
+*/
+/* Semaphores (semaphore.h) */
+static void sem_init_c(sem_t *sem, int pshared, unsigned int value);
+static void sem_destroy_c(sem_t *sem);
+static void sem_post_c(sem_t *sem);
+static void sem_wait_c(sem_t *sem);
+
+
+/****************/
+
+
+
 
 /**
  * @param nthreads = number of worker threads to create for this threadpool
@@ -145,7 +160,8 @@ struct thread_pool * thread_pool_new(int nthreads)
      pthread_cond_init_c(&pool->gs_queue_has_tasks, NULL); */
     pthread_mutex_init_c(&pool->shutting_down_lock, NULL);
     set_shutting_down_flag(pool, false); // synchronized
-    pool->num_workers = nthreads;
+    set_num_workers(pool, nthreads);
+
 
     // Initialize workers list
     pthread_mutex_init_c(&pool->workers_list_lock, NULL);
@@ -222,9 +238,9 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         worker_free(current_worker);
         // decrement number of workers since one has terminated via joining.
         fprintf(stdout, "[Thread ID: %lu] in %s(): Num_workers after worker_free will be %d\n", (unsigned long)pthread_self(), 
-                        "thread_pool_shutdown_and_destroy", pool->num_workers - 1);
-        pool->num_workers--;
+                        "thread_pool_shutdown_and_destroy", get_number_of_workers(pool));
 
+        decrement_num_workers(pool);
     }
 
     pthread_mutex_destroy_c(&pool->gs_queue_lock);
@@ -356,9 +372,9 @@ static void * worker_function(void *pool_and_worker_arg)
             if (is_shutting_down(pool)) {
                 pthread_mutex_unlock_c(&pool->gs_queue_lock);
                 fprintf(stdout, "[Thread ID: %lu] in %s(): in while(true) shutdown; Num_workers after exit will be %d\n",
-                            (unsigned long)pthread_self(), "worker_function", pool->num_workers - 1);
+                            (unsigned long)pthread_self(), "worker_function", get_number_of_workers(pool));
 
-                pool->num_workers--;
+                decrement_num_workers(pool);
                 /* TODO: remove worker from workers list before it exits */
                 /* TODO: free_worker(worker); */
                 pthread_exit(NULL);
@@ -512,6 +528,42 @@ static bool is_shutting_down(struct thread_pool* pool)
 }
 
 
+/* Decrements the number of workers in the thread pool
+ * @param 
+ */
+static void decrement_num_workers(struct thread_pool* pool) 
+{
+    assert(pool != NULL);
+    pthread_mutex_lock_c(&pool->num_workers_lock);
+    pool->num_workers--;
+    pthread_mutex_unlock_c(&pool->num_workers_lock);
+}
+
+/* Set the number of workers in the thread pool
+ * @param 
+ */
+static void set_num_workers(struct thread_pool* pool, int num_workers) 
+{
+    assert(pool != NULL);
+    pthread_mutex_lock_c(&pool->num_workers_lock);
+    pool->num_workers = num_workers;
+    pthread_mutex_unlock_c(&pool->num_workers_lock);
+}
+
+
+/* Get the number of workers in the pool
+ * @param pool A pointer to the pool
+ */
+static int get_number_of_workers(struct thread_pool* pool)
+{
+    assert(pool != NULL);
+    pthread_mutex_lock_c(&pool->num_workers_lock);
+    int n = pool->num_workers;
+    pthread_mutex_unlock_c(&pool->num_workers_lock);
+    return n;
+}
+
+
 static void worker_free(struct worker *worker)
 {
     assert(worker != NULL);
@@ -524,55 +576,39 @@ static void worker_free(struct worker *worker)
  * Is synchronized. If the calling thread's tid does not match the tid of any worker's 'thread_id'
  * member, than an error message is printed and the program exits.
  * @param pool The thread_pool
+ * @return A pointer to the worker that was removed from the list, or NULL if not found
  */
- // void remove_calling_thread_from_workers_list(struct thread_pool *pool)
- // {
- //    assert(pool != NULL);
- //    assert(pool->workers_list != NULL);
- //    assert(pool->workers_list_lock != NULL);
- //    pthread_t calling_tid = pthread_self();
- //    pthread_mutex_lock_c(&pool->workers_list_lock);
- //    struct list_elem *e;
- //    for (e = list_begin(&foo_list); e != list_end (&foo_list);
- //           e = list_next (e))
+ struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool)
+ {
+    assert(pool != NULL);
+    assert(&pool->workers_list != NULL);
+    assert(&pool->workers_list_lock != NULL);
 
- //    .... TODO
- // }
+    pthread_t calling_tid = pthread_self();
+    pthread_mutex_lock_c(&pool->workers_list_lock);
+    struct worker * removed_worker = NULL;
+    bool found = true;
+    struct list_elem *e;
+    for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list);
+         e = list_next(e)) {
+        struct worker *w = list_entry(e, struct worker, elem);
+        if (*w->thread_id == calling_tid) { /* found calling worker thread's position in the list */
+            // remove worker from the list
+            // list_remove returns list_elem not element itself
+            list_remove(e);
+            removed_worker = w;
+            break;
+        }
+    }
+    // if was found, return pointer to the worker, otherwise exit (error in logic of how this is called)
+    if (found) { return removed_worker; }
+    else { 
+        fprintf(stderr, "The worker for the calling thread was not found in remove_calling_thread_from_workers_list()!"
+          " Some logical error! Investigate!\n"); 
+        return NULL;
+    }
+ }
 
-/* Removes ELEM from its list and returns the element that
-   followed it.  Undefined behavior if ELEM is not in a list.
-
-   It's not safe to treat ELEM as an element in a list after
-   removing it.  In particular, using list_next() or list_prev()
-   on ELEM after removal yields undefined behavior.  This means
-   that a naive loop to remove the elements in a list will fail:
-
-   ** DON'T DO THIS **
-   for (e = list_begin (&list); e != list_end (&list); e = list_next (e))
-     {
-       ...do something with e...
-       list_remove (e);
-     }
-   ** DON'T DO THIS **
-
-   Here is one correct way to iterate and remove elements from a
-   list:
-
-   for (e = list_begin (&list); e != list_end (&list); e = list_remove (e))
-     {
-       ...do something with e...
-     }
-
-   If you need to free() elements of the list then you need to be
-   more conservative.  Here's an alternate strategy that works
-   even in that case:
-
-   while (!list_empty (&list))
-     {
-       struct list_elem *e = list_pop_front (&list);
-       ...do something with e...
-     }
-*/
 
 /***************************************************************************
  * Wrapper functions for malloc, pthread.h, and semaphore.h
@@ -582,8 +618,6 @@ static void worker_free(struct worker *worker)
  *     same name with _c appended to the end (for 'checked')
  *   - Not all pthread or semaphore functions included
  ***************************************************************************/
-
-
 static void error_exit(char *msg, int err_code)
 {
     fprintf(stderr, "\n\n / -----------------------------  %s: returned error code: %d  -----------------------------/ \n\n", msg, err_code);
