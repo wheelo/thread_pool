@@ -95,7 +95,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
     struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
     if (pool == NULL) {
-        fprintf(stdout, "%s: malloc\n", "thread_pool_new");
+        fprintf(stdout, "%s() malloc() error\n", "thread_pool_new");
     }
 
     list_init(&pool->gs_queue);    
@@ -103,7 +103,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     
     pool->shutdown_requested = false;
     pool->number_of_workers = nthreads;
-    sem_init(&pool->number_workers_to_shut_down, 0, nthreads);
+    sem_init(&pool->number_workers_to_shut_down, 0, -nthreads + 1);
 
     // Initialize workers list
     list_init(&pool->workers_list);
@@ -112,7 +112,7 @@ struct thread_pool * thread_pool_new(int nthreads)
         struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
         worker->thread_id = (pthread_t *) malloc(sizeof(pthread_t));
         if (worker == NULL || worker->thread_id == NULL) { 
-            fprintf(stdout, "%s:  malloc!!!!\n", "thread_pool_new");
+            fprintf(stdout, "%s()  malloc error\n", "thread_pool_new");
         }
         list_init(&worker->local_deque); 
         pthread_mutex_init(&worker->local_deque_lock, NULL);
@@ -133,7 +133,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     	worker_fn_args->worker = current_worker;  
 
         if (pthread_create(current_worker->thread_id, NULL, worker_function, worker_fn_args) != 0) {
-            fprintf(stdout, "%s: PTHREAD_CREATE ERROR!!!!\n", "pthread_create");
+            fprintf(stdout, "%s() PTHREAD_CREATE ERROR\n", "pthread_create");
         } 
     }
     pthread_mutex_unlock(&worker_fn_args->lock);
@@ -152,27 +152,25 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     fprintf(stdout, "> called %s(pool)\n", "thread_pool_shutdown_and_destroy");
 
 	assert(pool != NULL);
-    if (pthread_mutex_lock(&pool->gs_queue_lock) != 0) {
-        return;
-    }
-
+    pthread_mutex_lock(&pool->gs_queue_lock);
     if (pool->shutdown_requested) { // already called
         return; 
-    } 
-    
-    pool->shutdown_requested = true;
-    if (pthread_mutex_unlock(&pool->gs_queue_lock) != 0) {
-        return;
+    } else {
+        pool->shutdown_requested = true; 
     }
+    // we want the semaphore number_workers_to_shut_down's value = 1
+    //sem_wait(&pool->number_workers_to_shut_down); 
+    // now number_workers_to_shut_down's value = 0 but the remaining code in this function can safely execute
+    pthread_mutex_unlock(&pool->gs_queue_lock);
 
     // Join all worker threads
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
         
-        fprintf(stdout, ">> in %s, inside workers_list loop BEFORE JOIN\n", "thread_pool_shutdown_and_destroy");
+        fprintf(stdout, "> in %s() inside workers_list loop BEFORE JOIN\n", "thread_pool_shutdown_and_destroy");
         struct worker *current_worker = list_entry(e, struct worker, elem);
         pthread_join(*current_worker->thread_id, NULL);
-        fprintf(stdout, ">>> in %s, inside workers_list loop, join success\n", "thread_pool_shutdown_and_destroy");
+        fprintf(stdout, ">> in %s() inside workers_list loop JOIN SUCCESS\n", "thread_pool_shutdown_and_destroy");
         worker_free(current_worker);
     }
 
@@ -185,7 +183,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                                    fork_join_task_t task,
                                    void * data)
 {
-    fprintf(stdout, "called %s(pool, task, data)\n", "thread_pool_submit");
+    fprintf(stdout, ">> called %s(pool, task, data)\n", "thread_pool_submit");
     
     assert(pool != NULL);
     assert(task != NULL);
@@ -283,7 +281,7 @@ void future_free(struct future *f)
  */
 static void * worker_function(void *pool_and_worker_arg) 
 {
-    fprintf(stdout, ">> in %s, first line\n", "worker_function");
+    fprintf(stdout, ">>> in %s() first line\n", "worker_function");
 
 	is_worker = true; // = thread local variable
     struct thread_pool_and_current_worker *pool_and_worker = (struct thread_pool_and_current_worker *) pool_and_worker_arg;
@@ -300,6 +298,8 @@ static void * worker_function(void *pool_and_worker_arg)
         if (pool->shutdown_requested) {
             pthread_mutex_unlock(&pool->gs_queue_lock);
             locked = false;
+            fprintf(stdout, ">>> about to call %s(NULL)\n", "pthread_exit");
+            //sem_post(&pool->number_workers_to_shut_down); 
             pthread_exit(NULL);
         }
         if (locked) {
