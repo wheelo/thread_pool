@@ -5,18 +5,12 @@ Group 525:
 Huanqing Liu (quinnliu)
 Navid Rojiani (nrojiani)
 
-# TODO add driver file & instrxns
-
-
 ## How to run code
 1. Type to your command line:
    ```
    prompt> cd src
    prompt/src> make clean; make # build all code
-   prompt/src> ./mergesort -b number 
-   prompt/src> ./quicksort -b number
-   prompt/src> ./fib_test ???
-   prompt/src> ./psum_test ???
+   prompt/src> ~cs3214/bin/fjdriver.py 
    ```
 
 ## What each file/folder is for:
