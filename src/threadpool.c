@@ -185,8 +185,8 @@ struct future * thread_pool_submit(struct thread_pool *pool,
 {
     fprintf(stdout, ">> called %s(pool, task, data)\n", "thread_pool_submit");
     
-    assert(pool != NULL);
-    assert(task != NULL);
+    if (pool == NULL) { fprintf(stdout, "%s(pool, task, data) error pool = NULL\n", "thread_pool_submit"); }
+    if (task != NULL) { fprintf(stdout, "%s(pool, task, data) error task = NULL\n", "thread_pool_submit");}
     // --------------------- Initialize Future struct --------------------------
     struct future *p_future = (struct future*) malloc(sizeof(struct future));
     pthread_mutex_init(&p_future->f_lock, NULL);
@@ -246,9 +246,11 @@ void * future_get(struct future *f)
         // and the first future generated 2 other futures then the 1 thread
         // would execute 1 of the 2 generated futures and then deadlock.
         else if (f->status == NOT_STARTED) {
+            pthread_mutex_unlock(&f->f_lock);
             // Execute task in worker thread      
-
             void *result = (*(f->task_fp))(f->p_pool, f->param_for_task_fp);
+
+            pthread_mutex_lock(&f->f_lock);
             f->result = result;
             f->status = COMPLETED;
             pthread_mutex_unlock(&f->f_lock);
