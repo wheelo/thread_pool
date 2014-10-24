@@ -78,7 +78,7 @@ struct thread_pool {
     pthread_mutex_t gs_queue_lock;
    
     bool shutdown_requested; 
-    pthread_barrier_t barrier;
+    sem_t number_of_futures_to_execute;
 
     unsigned int number_of_workers;                     
     struct list workers_list;
@@ -102,8 +102,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
     
     pool->shutdown_requested = false;
-    pthread_barrier_init(&pool->barrier, NULL, nthreads + 1);
-
+    sem_init(&pool->number_of_futures_to_execute, 0, 0);
     pool->number_of_workers = nthreads;
 
     // Initialize workers list
@@ -161,9 +160,10 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     }
     pthread_mutex_unlock(&pool->gs_queue_lock);
 
-    // rendezvous point = the thread executing the code here doesn't continue until nthreads # of workers 
-    // have reached this point
-    pthread_barrier_wait(&pool->barrier);
+    int i;
+    for (i = 0; i < pool->number_of_workers; i++) {
+        sem_post(&pool->number_of_futures_to_execute);
+    }
 
     // Join all worker threads
     struct list_elem *e;
@@ -209,7 +209,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     	// Acquire lock for the global submission queue 
     	pthread_mutex_lock(&pool->gs_queue_lock);
 	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
-
+        sem_post(&pool->number_of_futures_to_execute);
 	    pthread_mutex_unlock(&pool->gs_queue_lock);
 	} 
     else { // internal submission by worker thread       
@@ -224,6 +224,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                 pthread_mutex_lock(&current_worker->local_deque_lock);
                 // internal submissions (futures) added to top of local deque                
                 list_push_front(&current_worker->local_deque, &p_future->deque_elem);
+                sem_post(&pool->number_of_futures_to_execute);
                 pthread_mutex_unlock(&current_worker->local_deque_lock);                            
             }
         }
@@ -301,8 +302,6 @@ static void * worker_function(void *pool_and_worker_arg)
             pthread_mutex_unlock(&pool->gs_queue_lock);
             locked = false;    
 
-            pthread_barrier_wait(&pool->barrier);
-
             fprintf(stdout, ">>> about to call %s(NULL)\n", "pthread_exit");
             pthread_exit(NULL);
         }
@@ -368,6 +367,9 @@ static void * worker_function(void *pool_and_worker_arg)
                 pthread_mutex_unlock(&other_worker->local_deque_lock);
             }
         }
+
+        // sem_wait(threadpool->semaphore)
+        sem_wait(&pool->number_of_futures_to_execute);
 	}
     return NULL;
 }
