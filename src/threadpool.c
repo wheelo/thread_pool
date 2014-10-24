@@ -100,11 +100,6 @@ static void worker_free(struct worker *worker);
 
 static bool is_shutting_down(struct thread_pool* pool);
 
-/* TODO:  For debugging, won't really need */
-static void decrement_num_workers(struct thread_pool* pool);
-static int get_num_workers(struct thread_pool* pool);
-static void set_num_workers(struct thread_pool* pool, int num_workers);
-
 static void error_exit(char *msg, int err_code);
 
 
@@ -113,7 +108,7 @@ static void error_exit(char *msg, int err_code);
 // Thread Routines
 static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr, 
                       void *(*start_routine)(void *), void *arg);
-//static void pthread_join_c(pthread_t thread, void **value_ptr);
+static void pthread_join_c(pthread_t thread, void **value_ptr);
 static pthread_t pthread_self_c(void);
 // Mutex Routines
 static void pthread_mutex_destroy_c(pthread_mutex_t *mutex);
@@ -122,10 +117,10 @@ static void pthread_mutex_lock_c(pthread_mutex_t *mutex);
 static void pthread_mutex_unlock_c(pthread_mutex_t *mutex);
 // Condition Variable Routines 
 
-static void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr);
-static void pthread_cond_destroy_c(pthread_cond_t *cond);
-static void pthread_cond_broadcast_c(pthread_cond_t *cond);
-static void pthread_cond_wait_c(pthread_cond_t *cond, pthread_mutex_t *mutex);
+// static void pthread_cond_init_c(pthread_cond_t *cond, const pthread_condattr_t *attr);
+// static void pthread_cond_destroy_c(pthread_cond_t *cond);
+// static void pthread_cond_broadcast_c(pthread_cond_t *cond);
+// static void pthread_cond_wait_c(pthread_cond_t *cond, pthread_mutex_t *mutex);
 
 /* Semaphores (semaphore.h) */
 static void sem_init_c(sem_t *sem, int pshared, unsigned int value);
@@ -172,10 +167,9 @@ struct thread_pool * thread_pool_new(int nthreads)
     set_shutting_down_flag(pool, false); // synchronized
 
     sem_init(&pool->number_of_futures_to_execute, 0, 0);
-    set_num_workers(pool, nthreads);
+    pool->num_workers = nthreads;
 
     // Initialize workers list
-    pthread_mutex_init_c(&pool->workers_list_lock, NULL);
     list_init(&pool->workers_list);
     int i;
     for(i = 0; i < nthreads; i++) {
@@ -249,9 +243,8 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     set_shutting_down_flag(pool, true);
     
     int i;
-    int n_workers = get_num_workers(pool);
-    for (i = 0; i < pool-> n_workers; i++) {
-        sem_post(&pool->number_of_futures_to_execute);
+    for (i = 0; i < pool->num_workers; i++) {
+        sem_post_c(&pool->number_of_futures_to_execute);
     }
 
     // Join all worker threads
@@ -319,7 +312,7 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
         // increment_num_tasks(pool);
          // pthread_cond_broadcast_c(&pool->tasks_available);
 
-        sem_post(&pool->number_of_futures_to_execute);
+        sem_post_c(&pool->number_of_futures_to_execute);
 	    pthread_mutex_unlock(&pool->gs_queue_lock);
 	} 
     else { // internal submission by worker thread       
@@ -335,7 +328,7 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
                 // internal submissions (futures) added to top of local deque                
                 list_push_front(&current_worker->local_deque, &p_future->deque_elem);
 
-                sem_post(&pool->number_of_futures_to_execute);
+                sem_post_c(&pool->number_of_futures_to_execute);
                 pthread_mutex_unlock(&current_worker->local_deque_lock);                            
             }
         }
@@ -387,7 +380,7 @@ void * future_get(struct future *f)
 //            decrement_num_tasks(f->p_pool);
 
             pthread_mutex_unlock(&f->f_lock);
-            sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
+            sem_post_c(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
         } else {
             pthread_mutex_unlock_c(&f->f_lock);
         }
@@ -470,7 +463,7 @@ static void * worker_function(void *pool_and_worker_arg)
 			future->result = result;
             future->status = COMPLETED;            
             pthread_mutex_unlock(&future->f_lock);  
-            sem_post(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any() 
+            sem_post_c(&future->result_sem); // increment_and_wake_a_waiting_thread_if_any() 
 
             continue; // there might be another future in local deque to execute        
 		} 
@@ -501,8 +494,6 @@ static void * worker_function(void *pool_and_worker_arg)
         // iterate through other worker threads' deques
         struct list_elem *e;
         bool stole_a_future = false;
-
-        pthread_mutex_lock_c(&pool->workers_list_lock);
 
         #ifdef DEBUG
          fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: FOR (loop through workers) \n", (unsigned long)pthread_self(), "worker_function");
@@ -557,7 +548,7 @@ static void set_shutting_down_flag(struct thread_pool* pool, bool shutting_down_
 {
     assert(pool != NULL);
     pthread_mutex_lock_c(&pool->shutting_down_lock);
-    pool->shutting_down = shutting_down_value; 
+    pool->is_shutting_down = shutting_down_value; 
     pthread_mutex_unlock_c(&pool->shutting_down_lock);
 }
 
@@ -570,7 +561,7 @@ static bool is_shutting_down(struct thread_pool* pool)
 {
     assert(pool != NULL);
     pthread_mutex_lock_c(&pool->shutting_down_lock);
-    bool flag = pool->shutting_down;
+    bool flag = pool->is_shutting_down;
     pthread_mutex_unlock_c(&pool->shutting_down_lock);
     return flag;
 }
@@ -614,7 +605,7 @@ static void pthread_create_c(pthread_t *thread, const pthread_attr_t *attr,
         error_exit("pthread_create", rc);
     }
 }
-/*
+
 static void pthread_join_c(pthread_t thread, void **value_ptr)
 {
     int rc;
@@ -623,7 +614,7 @@ static void pthread_join_c(pthread_t thread, void **value_ptr)
         error_exit("pthread_join", rc);
     }
 }
-*/
+
 
 //int pthread_cancel(pthread_t thread)
 
