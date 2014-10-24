@@ -424,49 +424,44 @@ static void * worker_function(void *pool_and_worker_arg)
         pthread_mutex_unlock_c(&pool->gs_queue_lock);
 
         /* 3) The worker attempts steals a task to work on from the bottom of other threads' deques */
-        fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal \n", (unsigned long)pthread_self(), "worker_function");
+        fprintf(stdout, "[Thread ID: %lu] in %s(): (3) STEAL starting \n", (unsigned long)pthread_self(), "worker_function");
         // iterate through other worker threads' deques
         struct list_elem *e;
-        bool stole_a_task = false;
+        bool stole_a_future = false;
 
-        // for each worker in the pool
-        do {
-            fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: DO \n", (unsigned long)pthread_self(), "worker_function");
-            for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
-                fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: FOR (loop through workers) \n", (unsigned long)pthread_self(), "worker_function");
-                
-                /* ONLY STEAL AT MOST ONE! AND MAYBE TRY JUST ADDING IT TO LOCAL DEQUE, NOT EXECUTING IT */
-                struct worker *other_worker = list_entry(e, struct worker, elem);
-                // steal task from bottom of their deque, if they have any tasks
+        pthread_mutex_lock_c(&pool->workers_list_lock);
 
-                /******** THIS IS RETURNING EINVAL (22) - Invalid Argument (Sometimes) 
-                          because exiting workers are not being removed from the queue?
-                          Or prevent invalid checking by maxing to pool->num_workers *********/
-                pthread_mutex_lock_c(&other_worker->local_deque_lock);
-                // will check its own queue, but it'll be empty, so not terribly inefficient?
-                if (!list_empty(&other_worker->local_deque)) {
-                    fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: FOR (loop through workers) IF: NOT EMPTY \n", (unsigned long)pthread_self(), "worker_function");
-
-                    /* TODO: try list_pop_back separately */
-                    struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
-                    pthread_mutex_unlock_c(&other_worker->local_deque_lock);
-                    stole_a_task = true;
-                    // now execute this stolen future 
-                    pthread_mutex_lock_c(&stolen_future->f_lock);                
-
-                    void *result = (*(stolen_future->task_fp))(pool, stolen_future->param_for_task_fp);
-                    stolen_future->result = result;
-                    stolen_future->status = COMPLETED;
-                    sem_post_c(&stolen_future->result_sem); // increment_and_wake_a_waiting_thread_if_any()
-                    pthread_mutex_unlock_c(&stolen_future->f_lock);      
-                }
-                else {
-                    pthread_mutex_unlock_c(&other_worker->local_deque_lock);
-                }
+        fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: FOR (loop through workers) \n", (unsigned long)pthread_self(), "worker_function");
+        for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
+            if (stole_a_future) {
+                break;
             }
-        } while (stole_a_task); // if it stole > 1 task, continue stealing by restarting the loop through
-                                    // all workers. 
-            
+            struct worker *other_worker = list_entry(e, struct worker, elem);
+            // steal future from bottom of their deque, if they have any futures
+            pthread_mutex_lock_c(&other_worker->local_deque_lock);
+            if (!list_empty(&other_worker->local_deque)) {
+                fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: ******at least 1 worker deque not empty****** \n", (unsigned long)pthread_self(), "worker_function");                
+                struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
+                pthread_mutex_unlock_c(&other_worker->local_deque_lock);
+                stole_a_future = true;
+                // now add this stolen future to the current worker's local deque
+                list_push_front(&worker->local_deque, &stolen_future->deque_elem);
+                fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: STOLE_A_FUTUTE = true \n", (unsigned long)pthread_self(), "worker_function");
+            } 
+            else {
+                pthread_mutex_unlock_c(&other_worker->local_deque_lock);
+            }
+            fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: COULD NOT STEAL \n", (unsigned long)pthread_self(), "worker_function"); 
+
+            if (get_number_of_workers(pool) <= 0) { 
+                fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: BREAK STEAL LOOP: num_workers <= 0 \n", (unsigned long)pthread_self(), "worker_function"); 
+                break; 
+            }             
+        }
+        pthread_mutex_unlock_c(&pool->workers_list_lock);
+
+
+                                
         fprintf(stdout, "[Thread ID: %lu] in %s(): (4) No Tasks [found by current algorithm] - nothing executed afterwards \n", (unsigned long)pthread_self(), "worker_function");
 
             /* Failing that, the worker thread should block until a task becomes available */
@@ -490,10 +485,9 @@ static void * worker_function(void *pool_and_worker_arg)
                 pthread_exit(NULL);
               }
               */
-    	
     }
 
-    return NULL;     /*     <----- PROBLEM ? */
+    return NULL;
 }
 
 
