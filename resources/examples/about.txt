@@ -1,2 +1,0 @@
-Examples for using pthread.h and semaphore.h taken from textbooks (mostly
-'Advanced Programming in the UNIX Environment', 3rd Ed.)
