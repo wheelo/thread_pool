@@ -360,7 +360,9 @@ static void * worker_function(void *pool_and_worker_arg)
                 stole_a_future = true;
 
                 // now add this stolen future to the current worker's local deque
+                pthread_mutex_lock(&worker->local_deque_lock);
                 list_push_front(&worker->local_deque, &stolen_future->deque_elem);
+                pthread_mutex_unlock(&worker->local_deque_lock);
             } else {
                 pthread_mutex_unlock(&other_worker->local_deque_lock);
             }
