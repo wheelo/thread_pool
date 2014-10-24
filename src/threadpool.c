@@ -552,7 +552,7 @@ static void * worker_function(void *pool_and_worker_arg)
                 // now add this stolen future to the current worker's local deque
                 list_push_front(&worker->local_deque, &stolen_future->deque_elem);
                 #ifdef DEBUG 
-                fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: STOLE_A_FUTUTE = true \n", (unsigned long)pthread_self(), "worker_function");
+                fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: STOLE_A_FUTURE = true \n", (unsigned long)pthread_self(), "worker_function");
                 #endif
             } 
             else {
@@ -613,7 +613,7 @@ static void set_shutting_down_flag(struct thread_pool* pool, bool shutting_down_
 {
     assert(pool != NULL);
     pthread_mutex_lock_c(&pool->shutting_down_lock);
-    pool->shutting_down = shutting_down_value; 
+    pool->shutting_down = shutting_down_value; c
     pthread_mutex_unlock_c(&pool->shutting_down_lock);
 }
 
