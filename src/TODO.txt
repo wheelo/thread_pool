@@ -1,0 +1,3 @@
+( ) instead of removing from workers list, why not try removing the worker_free call>?
+
+( ) TRY WITHOUT _c
