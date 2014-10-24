@@ -94,7 +94,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 	is_worker = false; // worker_function() sets it to true
 
     struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
-
+    assert(pool != NULL);
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
     list_init(&pool->gs_queue);    
     
@@ -235,11 +235,6 @@ void * future_get(struct future *f)
             pthread_mutex_unlock(&f->f_lock);
             //return f->result;
         }
-        // Below if statement is for when the threadpool has 1 thread and 
-        // multiple futures. You cannot just simply call sem_wait() here
-        // because if 1 worker thread calls sem_post() on the first future
-        // and the first future generated 2 other futures then the 1 thread
-        // would execute 1 of the 2 generated futures and then deadlock.
         else if (f->status == NOT_STARTED && (f->worker != NULL || f->in_gs_queue) ) {
             pthread_mutex_unlock(&f->f_lock);
             // future is stuck in worker thread deque or gs_queue
@@ -266,7 +261,6 @@ void * future_get(struct future *f)
             sem_post(&f->result_sem); // increment_and_wake_a_waiting_thread_if_any()
             //return f->result;
         }
-        pthread_mutex_unlock(&f->f_lock); 
         return f->result;
     } 
     else { // external threads 
@@ -350,7 +344,7 @@ static void * worker_function(void *pool_and_worker_arg)
             continue; // there might be another future in global submission queue to execute   
 		} 
         pthread_mutex_unlock(&pool->gs_queue_lock);
-
+        /*
         // 3) The worker attempts to steal a future to work on from the bottom of other threads' deques 
         struct list_elem *e;
         bool stole_a_future = false;
@@ -380,6 +374,7 @@ static void * worker_function(void *pool_and_worker_arg)
                 pthread_mutex_unlock(&other_worker->local_deque_lock);
             }
         }
+        */
 
         // sem_wait(threadpool->semaphore)
         sem_wait(&pool->number_of_futures_to_execute);
