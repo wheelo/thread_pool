@@ -301,7 +301,8 @@ static void * worker_function(void *pool_and_worker_arg)
             pthread_mutex_unlock(&pool->shutdown_requested_lock);
             locked = false;    
 
-            pthread_exit(NULL);
+            //pthread_exit(NULL);
+            break;
         }
         if (locked) {
             pthread_mutex_unlock(&pool->shutdown_requested_lock);
