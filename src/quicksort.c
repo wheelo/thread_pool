@@ -20,10 +20,13 @@
 #include <assert.h>
 #include <getopt.h>
 
+#include "threadpool_lib.h"
 #include "threadpool.h"
-static struct thread_pool * threadpool;
 
 typedef void (*sort_func)(int *, int);
+
+#define DEFAULT_THREADS 4
+static int nthreads = DEFAULT_THREADS;
 
 /* Return true if array 'a' is sorted. */
 static bool
@@ -117,8 +120,6 @@ struct qsort_task {
 static int  
 qsort_internal_parallel(struct thread_pool * threadpool, struct qsort_task * s)
 {
-    fprintf(stdout, ">>> called %s(threadpool, s)\n", "qsort_internal_parallel");
-
     int * array = s->array;
     int left = s->left;
     int right = s->right;
@@ -160,58 +161,68 @@ static int depth = 3;
 static void 
 qsort_parallel(int *array, int N) 
 {
-    fprintf(stdout, "\n\n>> called %s(array, %d)\n", "qsort_parallel", N);
     struct qsort_task root = {
         .left = 0, .right = N-1, .depth = depth, .array = array
     };
 
+    struct thread_pool * threadpool = thread_pool_new(nthreads);
     qsort_internal_parallel(threadpool, &root);
+    thread_pool_shutdown_and_destroy(threadpool);
 }
 
 /*
  * Benchmark one run of sort_func sorter
  */
 static void 
-benchmark(const char *benchmark_name, sort_func sorter, int *a0, int N)
+benchmark(const char *benchmark_name, sort_func sorter, int *a0, int N, bool report)
 {
-    struct timeval start, end, diff;
-
     int *a = malloc(N * sizeof(int));
     memcpy(a, a0, N * sizeof(int));
 
-    gettimeofday(&start, NULL);
-    sorter(a, N);
-    gettimeofday(&end, NULL);
+    struct benchmark_data * bdata = start_benchmark();
 
+    // parallel section here, including thread pool startup and shutdown
+    sorter(a, N);
+
+    stop_benchmark(bdata);
+
+    // consistency check
     if (!check_sorted(a, N)) {
         fprintf(stderr, "Sort failed\n");
         abort();
     }
-    timersub(&end, &start, &diff);
-    printf("%-20s took %.3f sec.\n", benchmark_name, diff.tv_sec + diff.tv_usec / 1.0e6);
+
+    // report only if successful
+    if (report)
+        report_benchmark_results(bdata);
+
+    printf("%s result ok. Timings follow\n", benchmark_name);
+    report_benchmark_results_to_human(stdout, bdata);
+
+    free(bdata);
     free(a);
 }
 
+
 static void
-usage(char *av0, int depth, int nthreads)
+usage(char *av0, int depth)
 {
     fprintf(stderr, "Usage: %s [-d <n>] [-n <n>] [-b] [-q] [-s <n>] <N>\n"
                     " -d        parallel recursion depth, default %d\n"
                     " -n        number of threads in pool, default %d\n"
                     " -b        run built-in qsort\n"
                     " -s        specify srand() seed\n"
-                    " -q        don't run serial qsort\n"
-                    , av0, depth, nthreads);
+                    " -q        run serial qsort\n"
+                    , av0, depth, DEFAULT_THREADS);
     exit(0);
 }
 
 int 
 main(int ac, char *av[]) 
 {
-    int nthreads = 4;
     int c;
     bool run_builtin_qsort = false;
-    bool run_serial_qsort = true;
+    bool run_serial_qsort = false;
 
     while ((c = getopt(ac, av, "d:n:bhs:q")) != EOF) {
         switch (c) {
@@ -228,14 +239,14 @@ main(int ac, char *av[])
             run_builtin_qsort = true;
             break;
         case 'q':
-            run_serial_qsort = false;
+            run_serial_qsort = true;
             break;
         case 'h':
-            usage(av[0], depth, nthreads);
+            usage(av[0], depth);
         }
     }
     if (optind == ac)
-        usage(av[0], depth, nthreads);
+        usage(av[0], depth);
 
     int N = atoi(av[optind]);
 
@@ -244,18 +255,14 @@ main(int ac, char *av[])
         a0[i] = random();
 
     if (run_builtin_qsort)
-        benchmark("Built-in qsort", builtin_qsort, a0, N);
+        benchmark("Built-in qsort", builtin_qsort, a0, N, false);
 
     if (run_serial_qsort)
-        benchmark("qsort serial", qsort_serial, a0, N);
+        benchmark("qsort serial", qsort_serial, a0, N, false);
 
-    threadpool = thread_pool_new(nthreads);
     printf("Using %d threads, recursive parallel depth=%d\n", nthreads, depth);
-    sleep(1);
+    benchmark("qsort parallel", qsort_parallel, a0, N, true);
 
-    benchmark("qsort parallel", qsort_parallel, a0, N);
-
-    thread_pool_shutdown_and_destroy(threadpool);
     return 0;
 }
 

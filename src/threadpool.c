@@ -196,6 +196,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     p_future->result = NULL;
     sem_init(&p_future->result_sem, 0, 0);
     p_future->status = NOT_STARTED;
+    p_future->p_pool = pool;
     //pthread_mutex_unlock(&p_future->f_lock);
     // -------------------------------------------------------------------------
 
@@ -318,7 +319,6 @@ static void * worker_function(void *pool_and_worker_arg)
 			pthread_mutex_unlock(&worker->local_deque_lock);
 
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /// execute future task  
-
             pthread_mutex_lock(&future->f_lock); // TODO: do I need to lock before executing task_fp?   
 			future->result = result;
             future->status = COMPLETED;            

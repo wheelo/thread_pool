@@ -53,12 +53,32 @@ parallel_sum(struct thread_pool * pool, void * _data)
     return (void *)(lresult + rresult);
 }
 
+static void usage(char *av0, int nthreads) {
+    fprintf(stderr, "Usage: %s [-n <n>] <N>\n"
+                    " -n        number of threads in pool, default %d\n"
+                    , av0, nthreads);
+    exit(0);
+}
+
 int
 main(int ac, char *av[])
 {
-    int nthreads = atoi(av[1]);
+    int nthreads = 4;
+    int c;
+    while ((c = getopt(ac, av, "n:h")) != EOF) {
+        switch (c) {
+        case 'n':
+            nthreads = atoi(optarg);
+            break;
+        case 'h':
+            usage(av[0], nthreads);
+        }
+    }
+    if (optind == ac)
+        usage(av[0], nthreads);
+
+    int len = atoi(av[optind]);
     struct thread_pool * pool = thread_pool_new(nthreads);
-    int len = atoi(av[2]);
 
     int * v = malloc(sizeof(int) * len);
     struct problem_parameters roottask = {
@@ -73,20 +93,18 @@ main(int ac, char *av[])
     }
 
     printf("starting...\n");
-    struct timespec start, end;
-    clock_gettime(CLOCK_REALTIME, &start);
+    struct benchmark_data* bdata = start_benchmark();
     struct future *f = thread_pool_submit(pool, parallel_sum, &roottask);
     unsigned long long sum = (unsigned long long) future_get(f);
+    stop_benchmark(bdata);
     future_free(f);
-    clock_gettime(CLOCK_REALTIME, &end);
 
     if (sum != realsum) {
         printf("result %lld should be %lld\n", sum, realsum);
-        return -1;
+        abort();
     } else {
-        char buf[80];
-        timespec_print(timespec_diff(start, end), buf, sizeof buf);
-        printf("result ok. took %s\n", buf);
+        printf("result ok.\n");
+        report_benchmark_results(bdata);
     }
 
     thread_pool_shutdown_and_destroy(pool);

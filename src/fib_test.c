@@ -1,7 +1,9 @@
 /*
- * Thread pool test program.
  * Parallel fibonacci.
- * C version of http://en.cppreference.com/w/cpp/thread/async
+ *
+ * This is just a toy program to see how well the
+ * underlying FJ framework supports extremely fine-grained
+ * tasks.
  *
  * Written by G. Back for CS3214 Fall 2014.
  */
@@ -24,8 +26,6 @@ struct problem_parameters {
     unsigned n;
 };
 
-#define GRANULARITY 100
-
 static void *
 fibonacci(struct thread_pool * pool, void * _data)
 {
@@ -42,12 +42,32 @@ fibonacci(struct thread_pool * pool, void * _data)
     return (void *)(lresult + rresult);
 }
 
+static void usage(char *av0, int nthreads) {
+    fprintf(stderr, "Usage: %s [-d <n>] [-n <n>] <N>\n"
+                    " -n        number of threads in pool, default %d\n"
+                    , av0, nthreads);
+    exit(0);
+}
+
 int
 main(int ac, char *av[])
 {
-    int nthreads = atoi(av[1]);
+    int nthreads = 4;
+    int c;
+    while ((c = getopt(ac, av, "n:h")) != EOF) {
+        switch (c) {
+        case 'n':
+            nthreads = atoi(optarg);
+            break;
+        case 'h':
+            usage(av[0], nthreads);
+        }
+    }
+    if (optind == ac)
+        usage(av[0], nthreads);
+
+    int n = atoi(av[optind]);
     struct thread_pool * pool = thread_pool_new(nthreads);
-    int n = atoi(av[2]);
 
     struct problem_parameters roottask = { .n = n };
 
@@ -59,19 +79,17 @@ main(int ac, char *av[])
     }
 
     printf("starting...\n");
-    struct timespec start, end;
-    clock_gettime(CLOCK_REALTIME, &start);
+    struct benchmark_data* bdata = start_benchmark();
     struct future *f = thread_pool_submit(pool, fibonacci, &roottask);
     unsigned long long Fvalue = (unsigned long long) future_get(f);
-    clock_gettime(CLOCK_REALTIME, &end);
-
+    stop_benchmark(bdata);
+    future_free(f);
     if (Fvalue != F[n]) {
         printf("result %lld should be %lld\n", Fvalue, F[n]);
-        return -1;
+        abort();
     } else {
-        char buf[80];
-        timespec_print(timespec_diff(start, end), buf, sizeof buf);
-        printf("result ok. took %s\n", buf);
+        printf("result ok.\n");
+        report_benchmark_results(bdata);
     }
 
     thread_pool_shutdown_and_destroy(pool);
