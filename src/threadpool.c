@@ -345,6 +345,7 @@ static void * worker_function(void *pool_and_worker_arg)
             continue; // there might be another future in global submission queue to execute   
 		} 
         pthread_mutex_unlock(&pool->gs_queue_lock);
+        
         /*
         // 3) The worker attempts to steal a future to work on from the bottom of other threads' deques 
         struct list_elem *e;
@@ -374,8 +375,8 @@ static void * worker_function(void *pool_and_worker_arg)
             } else {
                 pthread_mutex_unlock(&other_worker->local_deque_lock);
             }
-        }
-        */
+        }*/
+        
 
         // sem_wait(threadpool->semaphore)
         sem_wait(&pool->number_of_futures_to_execute);
