@@ -13,8 +13,8 @@
 #include <string.h>
 
 #include "list.h"
-//#define DEBUG // comment out to turn off debug print statements
-//#define FAIL_ON_ERROR
+#define DEBUG // comment out to turn off debug print statements
+#define FAIL_ON_ERROR
 
 /**
  * Holds the threadpool and the current worker to be passed in to function
@@ -405,6 +405,18 @@ void * future_get(struct future *f)
             pthread_mutex_unlock_c(&f->f_lock);   /* FUTURE A UNLOCKED IF WAS NOT_STARTED, NOW COMPLETED */
             return f->result;
         } 
+        else {        /* FUTURE A UNLOCKED IF WAS NOT_STARTED, NOW ? */
+            // only two possible values, COMPLETED or NOT_STARTED. 
+            #ifdef DEBUG
+            fprintf(stdout, "[Thread ID: %lu] in %s(): REACHED UNNEC. ELSE\n", (unsigned long)pthread_self() % 1000, "future_get");
+             #endif
+            #ifdef FAIL_ON_ERROR
+            exit(EXIT_FAILURE);
+            #endif
+
+            //pthread_mutex_unlock_c(&f->f_lock);
+            //return f->result;
+        }
     } 
     else { // external threads 
         // External threads always block here
@@ -486,6 +498,34 @@ static void * worker_function(void *pool_and_worker_arg)
             #endif
             struct future *future = list_entry(list_pop_front(&worker->local_deque), struct future, deque_elem);
             
+            // #ifdef DEBUG
+            // fprintf(stdout, "[Thread ID: %lu] in %s(): UNLOCK: &worker->local_deque_lock \n", (unsigned long)pthread_self() % 1000, "worker_function");
+            // #endif
+            // pthread_mutex_unlock_c(&worker->local_deque_lock);        
+            
+            // #ifdef DEBUG
+            // fprintf(stdout, "[Thread ID: %lu] in %s(): LOCK: &future->f_lock (1) \n", (unsigned long)pthread_self() % 1000, "worker_function");
+            // #endif
+            // pthread_mutex_lock_c(&future->f_lock);
+            
+            // #ifdef DEBUG
+            // fprintf(stdout, "[Thread ID: %lu] in %s(): executing future. (1) \n", (unsigned long)pthread_self() % 1000, "worker_function");
+            // #endif
+            // void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /* execute future task */
+            // future->result = result;
+            // future->status = COMPLETED;            
+            // // increment_and_wake_a_waiting_thread_if_any()
+            // #ifdef DEBUG
+            // fprintf(stdout, "[Thread ID: %lu] in %s(): executing future completed. (1) \n", (unsigned long)pthread_self() % 1000, "worker_function");
+            // #endif
+
+
+            // #ifdef DEBUG
+            // fprintf(stdout, "[Thread ID: %lu] in %s(): UNLOCK: &future->f_lock (1) \n", (unsigned long)pthread_self() % 1000, "worker_function");
+            // #endif            
+            // pthread_mutex_unlock_c(&future->f_lock);
+            
+            // sem_post_c(&future->result_sem);
             future_get(future);
             continue; // there might be another future in local deque to execute
         }
