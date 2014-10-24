@@ -26,3 +26,7 @@ mergesort
 psum_test
 quicksort
 fj_testdir*
+nqueens
+threadpool_test
+threadpool_test2
+threadpool_test3
