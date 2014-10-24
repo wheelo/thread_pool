@@ -1,15 +1,15 @@
 // TODO
 
-( ) Must remove worker thread from workers_list prior to pthread_exit and/or worker_free()
-
-( ) pthread_join_c 
+(x) Must remove worker thread from workers_list prior to pthread_exit and/or worker_free()
 
 
-( ) Try without exiting in error exit
+(x) Try without exiting in error exit
 
 
 (X) Take out remove calling_worker
 
+(X) pthread_join vs. pthread_join_c
+(X) worker_fn() logic wrapped in while(true)
 
  Top of worker_function()
 
@@ -34,9 +34,17 @@
 
 (X) Take out workers_list_lock
 
-( ) Make mutex_lock --> mutex_trylock
-( ) Make sem_wait --> sem_trywait
+(x) Make mutex_lock --> mutex_trylock
+(x) Make sem_wait --> sem_trywait
+
+
 ( ) if unable to steal, sleep
+    ( ) semaphores
+
+    ( ) NEED TO WRAP SEM_POST IN LOOP?
+
+( ) mutex/sem in worker need to be init'd after pthread_create?
+( ) same w/ sems for future?
 
 
 ( ) add back to end of worker function
