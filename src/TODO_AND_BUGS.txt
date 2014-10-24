@@ -35,6 +35,22 @@
 (X) Take out workers_list_lock
 
 ( ) Make mutex_lock --> mutex_trylock
+( ) Make sem_wait --> sem_trywait
+( ) if unable to steal, sleep
+
+
+( ) add back to end of worker function
+        /*
+        if (pool->shutdown_requested) {   // in while loop?
+            pthread_mutex_unlock_c(&pool->tasks_available_lock); // change
+            pthread_exit(NULL);
+        }
+        */
+
+(X) Removed both worker_free()
+
+( ) pool_and_worker
+	now worker passed, and worker has a ptr to pool
 
 // POSSIBLE BUGS
 
