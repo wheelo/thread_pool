@@ -67,21 +67,22 @@ struct future {
 struct worker {
     pthread_t *thread_id;
 
-    struct list/*<Future>*/ local_deque;
+    struct list/*<future>*/ local_deque;
     pthread_mutex_t local_deque_lock;
 
     struct list_elem elem;
 };
 
 struct thread_pool {
-    struct list/*<Future>*/ gs_queue; // global submission queue
     pthread_mutex_t gs_queue_lock;
+    struct list/*<future>*/ gs_queue; // global submission queue
    
+    pthread_mutex_t shutdown_requested_lock;
     bool shutdown_requested; 
     sem_t number_of_futures_to_execute;
 
-    unsigned int number_of_workers;                     
-    struct list workers_list;
+    unsigned int number_of_workers;
+    struct list/*<future>*/ workers_list;
 };
 
 /**
@@ -94,13 +95,12 @@ struct thread_pool * thread_pool_new(int nthreads)
 	is_worker = false; // worker_function() sets it to true
 
     struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
-    if (pool == NULL) {
-        fprintf(stdout, "%s() malloc() error\n", "thread_pool_new");
-    }
+    if (pool == NULL) { fprintf(stdout, "%s() malloc() error\n", "thread_pool_new"); }
 
-    list_init(&pool->gs_queue);    
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
+    list_init(&pool->gs_queue);    
     
+    pthread_mutex_init(&pool->shutdown_requested_lock, NULL);
     pool->shutdown_requested = false;
     sem_init(&pool->number_of_futures_to_execute, 0, 0);
     pool->number_of_workers = nthreads;
@@ -111,9 +111,7 @@ struct thread_pool * thread_pool_new(int nthreads)
     for(i = 0; i < nthreads; i++) {
         struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
         worker->thread_id = (pthread_t *) malloc(sizeof(pthread_t));
-        if (worker == NULL || worker->thread_id == NULL) { 
-            fprintf(stdout, "%s()  malloc error\n", "thread_pool_new");
-        }
+        if (worker == NULL || worker->thread_id == NULL) { fprintf(stdout, "%s()  malloc error\n", "thread_pool_new"); }
         list_init(&worker->local_deque); 
         pthread_mutex_init(&worker->local_deque_lock, NULL);
         list_push_back(&pool->workers_list, &worker->elem);
@@ -152,13 +150,13 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     fprintf(stdout, "> called %s(pool)\n", "thread_pool_shutdown_and_destroy");
 
 	assert(pool != NULL);
-    pthread_mutex_lock(&pool->gs_queue_lock);
+    pthread_mutex_lock(&pool->shutdown_requested_lock);
     if (pool->shutdown_requested) { // already called
         return; 
     } else {
         pool->shutdown_requested = true; 
     }
-    pthread_mutex_unlock(&pool->gs_queue_lock);
+    pthread_mutex_unlock(&pool->shutdown_requested_lock);
 
     int i;
     for (i = 0; i < pool->number_of_workers; i++) {
@@ -296,17 +294,17 @@ static void * worker_function(void *pool_and_worker_arg)
     // The worker thread checks three potential locations for futures to execute 
 	while (true) {
         // check if threadpool has been shutdown
-        pthread_mutex_lock(&pool->gs_queue_lock);
+        pthread_mutex_lock(&pool->shutdown_requested_lock);
         bool locked = true;
         if (pool->shutdown_requested) {
-            pthread_mutex_unlock(&pool->gs_queue_lock);
+            pthread_mutex_unlock(&pool->shutdown_requested_lock);
             locked = false;    
 
             fprintf(stdout, ">>> about to call %s(NULL)\n", "pthread_exit");
             pthread_exit(NULL);
         }
         if (locked) {
-            pthread_mutex_unlock(&pool->gs_queue_lock);
+            pthread_mutex_unlock(&pool->shutdown_requested_lock);
         }
 
         // 1) Checks its own local deque first 
