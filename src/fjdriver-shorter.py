@@ -5,7 +5,7 @@
 #
 # Written by Godmar and Scott
 # Fall 2014, CS 3214
-# NOTE: check version 
+#
 version = "$Id: fjdriver.py,v 1.21 2014/10/20 15:25:14 cs3214 Exp $"
 
 #
@@ -40,7 +40,7 @@ __test_run = namedtuple('test_run', [
     'name', 'args', 'thread_count', 'input_file', 'is_benchmarked', 'timeout'
 ])
 
-def test_run(name, args, thread_count=thread_count, input_file=None, is_benchmarked=False, timeout=15):
+def test_run(name, args, thread_count=thread_count, input_file=None, is_benchmarked=False, timeout=5):
     return __test_run(name, args, thread_count, input_file, is_benchmarked, timeout)
 
 ##########################################################################33

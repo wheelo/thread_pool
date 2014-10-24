@@ -5,12 +5,36 @@
 ( ) pthread_join_c 
 
 
+( ) Try without exiting in error exit
 
 
+(X) Take out remove calling_worker
 
 
+ Top of worker_function()
 
+	removed lines:
+	        remove_calling_thread_from_workers_list(pool);
+            decrement_num_workers(pool);
 
+	 while (true) {
+        // check if threadpool has been shutdown
+        if (is_shutting_down(pool)) {
+            #ifdef DEBUG 
+            fprintf(stdout, "[Thread ID: %lu] in %s(): in while(true) shutdown; Num_workers after exit will be %d\n",
+                            (unsigned long)pthread_self(), "worker_function", get_number_of_workers(pool));
+            #endif
+            remove_calling_thread_from_workers_list(pool);
+            decrement_num_workers(pool);
+            /* TODO: remove worker from workers list before it exits */
+            /* TODO: free_worker(worker); */
+            pthread_exit(NULL);
+        }
+        
+
+(X) Take out workers_list_lock
+
+( ) Make mutex_lock --> mutex_trylock
 
 // POSSIBLE BUGS
 

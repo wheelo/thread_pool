@@ -14,7 +14,7 @@
 
 #include "list.h"
 //#define DEBUG // comment out to turn off debug print statements
-
+//#define FAIL_ON_ERROR
 
 /**
  * Holds the threadpool and the current worker to be passed in to function
@@ -80,7 +80,7 @@ struct thread_pool {
     pthread_mutex_t shutting_down_lock; // lock to synchronize the shutting_down flag
 
     struct list workers_list;
-    pthread_mutex_t workers_list_lock;
+    //pthread_mutex_t workers_list_lock;
 
     unsigned int num_workers;     // number of worker threads in the threadpool              
     pthread_mutex_t num_workers_lock;  
@@ -102,7 +102,7 @@ static void decrement_num_workers(struct thread_pool* pool);
 static int get_number_of_workers(struct thread_pool* pool);
 static void set_num_workers(struct thread_pool* pool, int num_workers);
 
-static struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool);
+//static struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool);
 static void error_exit(char *msg, int err_code);
 
 
@@ -166,7 +166,7 @@ struct thread_pool * thread_pool_new(int nthreads)
 
 
     // Initialize workers list
-    pthread_mutex_init_c(&pool->workers_list_lock, NULL);
+    //pthread_mutex_init_c(&pool->workers_list_lock, NULL);
     list_init(&pool->workers_list);
     int i;
     for(i = 0; i < nthreads; i++) {
@@ -245,7 +245,12 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 
         /* TODO if not here, need to add somewhere else */
         /* ????? */
-        /** maybe don't need this. always worker thread joined?? remove_calling_thread_from_workers_list(pool); */
+        /****************************************************
+        * maybe don't need this. always worker thread joined?? 
+        *
+        *
+        * remove_calling_thread_from_workers_list(pool); 
+        *****************************************************/
         /** could do if (is_worker) { remove.. } */
         worker_free(current_worker);
         // decrement number of workers since one has terminated via joining.
@@ -258,7 +263,7 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
 
     pthread_mutex_destroy_c(&pool->gs_queue_lock);
     pthread_mutex_destroy_c(&pool->shutting_down_lock);
-    pthread_mutex_destroy_c(&pool->workers_list_lock);
+    //pthread_mutex_destroy_c(&pool->workers_list_lock);
     // TODO cond vars
     // pthread_cond_destroy(&pool->gs_queue_has_tasks); 
     //#ifdef DEBUG fprintf(stdout, "cond_destroy : prob. still locked!\n");
@@ -385,6 +390,7 @@ static void * worker_function(void *pool_and_worker_arg)
     struct thread_pool *pool = pool_and_worker->pool;
     struct worker *worker = pool_and_worker->worker;
     pthread_mutex_unlock_c(&pool_and_worker->lock);
+    // FREE p&w
             
     // The worker thread checks three potential locations for futures to execute 
     #ifdef DEBUG
@@ -397,8 +403,10 @@ static void * worker_function(void *pool_and_worker_arg)
             fprintf(stdout, "[Thread ID: %lu] in %s(): in while(true) shutdown; Num_workers after exit will be %d\n",
                             (unsigned long)pthread_self(), "worker_function", get_number_of_workers(pool));
             #endif
+            /*****************************
             remove_calling_thread_from_workers_list(pool);
             decrement_num_workers(pool);
+            ******************************/
             /* TODO: remove worker from workers list before it exits */
             /* TODO: free_worker(worker); */
             pthread_exit(NULL);
@@ -422,9 +430,9 @@ static void * worker_function(void *pool_and_worker_arg)
             void *result = (*(future->task_fp))(pool, future->param_for_task_fp);  /* execute future task */
             future->result = result;
             future->status = COMPLETED;            
-            sem_post_c(&future->result_sem);
             // increment_and_wake_a_waiting_thread_if_any()
             pthread_mutex_unlock_c(&future->f_lock);
+            sem_post_c(&future->result_sem);
             continue; // there might be another future in local deque to execute
         }
         // 'if' must be false to get to this point. When 'if' true, releases lock. 
@@ -453,6 +461,7 @@ static void * worker_function(void *pool_and_worker_arg)
             // add it to this worker's deque;
             pthread_mutex_lock_c(&worker->local_deque_lock);
             list_push_front(&worker->local_deque, &future->deque_elem);
+
             if (!list_empty(&worker->local_deque)) {
                 #ifdef DEBUG 
                 fprintf(stdout, "[Thread ID: %lu] in %s(): (2) {XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX}|ADDED FROM QUEUE TO LOCAL DEQUE \n", (unsigned long)pthread_self(), "worker_function");
@@ -476,7 +485,7 @@ static void * worker_function(void *pool_and_worker_arg)
         struct list_elem *e;
         bool stole_a_future = false;
 
-        pthread_mutex_lock_c(&pool->workers_list_lock);
+        //pthread_mutex_lock_c(&pool->workers_list_lock);
 
         #ifdef DEBUG
          fprintf(stdout, "[Thread ID: %lu] in %s(): (3) Steal: FOR (loop through workers) \n", (unsigned long)pthread_self(), "worker_function");
@@ -495,6 +504,9 @@ static void * worker_function(void *pool_and_worker_arg)
                 struct future *stolen_future = list_entry(list_pop_back(&other_worker->local_deque), struct future, deque_elem);
                 pthread_mutex_unlock_c(&other_worker->local_deque_lock);
                 stole_a_future = true;
+
+                pthread_mutex_lock_c(&other_worker->local_deque_lock);
+                pthread_mutex_lock_c(&worker->local_deque_lock);
                 // now add this stolen future to the current worker's local deque
                 list_push_front(&worker->local_deque, &stolen_future->deque_elem);
                 #ifdef DEBUG 
@@ -515,7 +527,7 @@ static void * worker_function(void *pool_and_worker_arg)
                 break; 
             }             
         }
-        pthread_mutex_unlock_c(&pool->workers_list_lock);
+        //pthread_mutex_unlock_c(&pool->workers_list_lock);
 
 
                                 
@@ -626,7 +638,7 @@ static void worker_free(struct worker *worker)
  * member, than an error message is printed and the program exits.
  * @param pool The thread_pool
  * @return A pointer to the worker that was removed from the list, or NULL if not found
- */
+ *
  static struct worker * remove_calling_thread_from_workers_list(struct thread_pool *pool)
  {
     assert(pool != NULL);
@@ -641,7 +653,7 @@ static void worker_free(struct worker *worker)
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list);
          e = list_next(e)) {
         struct worker *w = list_entry(e, struct worker, elem);
-        if (*w->thread_id == calling_tid) { /* found calling worker thread's position in the list */
+        if (*w->thread_id == calling_tid) { // found calling worker thread's position in the list 
             // remove worker from the list
             // list_remove returns list_elem not element itself
             list_remove(e);
@@ -662,7 +674,7 @@ static void worker_free(struct worker *worker)
         return NULL;
     }
  }
-
+*****************/
 
 /***************************************************************************
  * Wrapper functions for malloc, pthread.h, and semaphore.h
@@ -675,7 +687,9 @@ static void worker_free(struct worker *worker)
 static void error_exit(char *msg, int err_code)
 {
     fprintf(stderr, "\n\n / -----------------------------  %s: returned error code: %d  -----------------------------/ \n\n", msg, err_code);
-    exit(EXIT_FAILURE);
+    #ifdef FAIL_ON_ERROR
+        exit(EXIT_FAILURE);
+    #endif
 }
 
 /* POSIX Threads (pthread.h) */
