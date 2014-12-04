@@ -105,9 +105,8 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
     }
     pthread_mutex_unlock(&pool->shutdown_requested_lock);
 
-    int i;
-    for (i = 0; i < pool->number_of_workers; i++) {
-        sem_post(&pool->number_of_futures_to_execute);
+    if (pthread_cond_broadcast(&pool->condition) != 0) {
+        return;
     }
 
     // Join all worker threads
@@ -116,10 +115,10 @@ void thread_pool_shutdown_and_destroy(struct thread_pool *pool)
         
         struct worker *current_worker = list_entry(e, struct worker, elem);
         pthread_join(*current_worker->thread_id, NULL);
-        worker_free(current_worker);
     }
 
     pthread_mutex_destroy(&pool->gs_queue_lock); 
+    pthread_cond_destroy(&pool->condition);
     free(pool);
     return;
 }
