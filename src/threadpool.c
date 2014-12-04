@@ -140,7 +140,7 @@ struct future * thread_pool_submit(struct thread_pool *pool,
     sem_init(&future->result_sem, 0, 0);
 
     pthread_mutex_lock(&pool->gs_queue_lock);
-    list_push_back(&pool->gs_queue, &future->elem);
+    list_push_back(&pool->gs_queue, &future->gs_queue_elem);
     pthread_mutex_unlock(&pool->gs_queue_lock);
 
     return future;
@@ -171,7 +171,7 @@ static void * worker_function(void *threadpool)
 	while (true) {
         pthread_mutex_lock(&pool->gs_queue_lock);
 
-        while (list_empty(&pool->futures_list)) {
+        while (list_empty(&pool->gs_queue)) {
             pthread_cond_wait(&pool->condition, &pool->gs_queue_lock);
 
             // check if threadpool has been shutdown
@@ -182,7 +182,7 @@ static void * worker_function(void *threadpool)
             }
         }
 
-        struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, elem);
+        struct future *future = list_entry(list_pop_front(&pool->gs_queue), struct future, gs_queue_elem);
         pthread_mutex_unlock(&pool->gs_queue_lock);
 
         future->result = future->task_fp(pool, future->param_for_task_fp);  
