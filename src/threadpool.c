@@ -127,58 +127,24 @@ struct future * thread_pool_submit(struct thread_pool *pool,
                                    fork_join_task_t task,
                                    void * data)
 {    
-    // --------------------- Initialize Future struct --------------------------
-    struct future *p_future = (struct future*) malloc(sizeof(struct future));
-    pthread_mutex_init(&p_future->f_lock, NULL);
-    pthread_mutex_lock(&p_future->f_lock);
-    p_future->param_for_task_fp = data;
-    p_future->task_fp = task; 
-    p_future->result = NULL;
-    sem_init(&p_future->result_sem, 0, 0);
-    p_future->status = NOT_STARTED;
-    p_future->p_pool = pool;
-    pthread_mutex_unlock(&p_future->f_lock);
-    // -------------------------------------------------------------------------
+    pthread_mutex_lock(&pool->shutdown_requested_lock);
+    if (pool->shutdown_requested) {
+        return NULL;
+    }
+    pthread_mutex_unlock(&pool->shutdown_requested_lock);
 
-    // If this thread is not a worker, add future to global queue (external submission)
-    if (!is_worker) {
+    // Initialize Future struct 
+    struct future *future = (struct future*) malloc(sizeof(struct future));
+    future->param_for_task_fp = data;
+    future->task_fp = task; 
+    future->result = NULL;
+    sem_init(&future->result_sem, 0, 0);
 
-    	// Acquire lock for the global submission queue 
-    	pthread_mutex_lock(&pool->gs_queue_lock);
-        
-        pthread_mutex_lock(&p_future->f_lock);
-        p_future->in_gs_queue = true;
-        p_future->worker = NULL;
-        pthread_mutex_unlock(&p_future->f_lock);
+    pthread_mutex_lock(&pool->gs_queue_lock);
+    list_push_back(&pool->gs_queue, &future->elem);
+    pthread_mutex_unlock(&pool->gs_queue_lock);
 
-	    list_push_back(&pool->gs_queue, &p_future->gs_queue_elem);
-        sem_post(&pool->number_of_futures_to_execute);
-	    pthread_mutex_unlock(&pool->gs_queue_lock);
-	} 
-    else { // internal submission by worker thread       
-        // add to the top of local_deque of the worker thread calling the thread_pool_submit()
-        pthread_t this_thread_id = pthread_self();
-        // loop through pool's worker_list to find the worker struct with this thread's tid
-
-        struct list_elem *e;
-        for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
-            struct worker *current_worker = list_entry(e, struct worker, elem);
-            if (*current_worker->thread_id == this_thread_id) {
-
-                pthread_mutex_lock(&p_future->f_lock);
-                p_future->in_gs_queue = false;
-                p_future->worker = current_worker;
-                pthread_mutex_unlock(&p_future->f_lock);
-
-                pthread_mutex_lock(&current_worker->local_deque_lock);
-                // internal submissions (futures) added to top of local deque                
-                list_push_front(&current_worker->local_deque, &p_future->deque_elem);
-                sem_post(&pool->number_of_futures_to_execute);
-                pthread_mutex_unlock(&current_worker->local_deque_lock);                            
-            }
-        }
-	}
-	return p_future;
+    return future;
 }
 
 void * future_get(struct future *f) 
