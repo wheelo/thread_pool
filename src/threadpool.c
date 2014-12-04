@@ -13,33 +13,9 @@
 
 #include "list.h"
 
-/**
- * Holds the threadpool and the current worker to be passed in to function
- * worker_function() so that this function can do future execution and
- * future stealing logic.
- */
-struct thread_pool_and_current_worker {
-    pthread_mutex_t lock;
-	struct thread_pool *pool;
-	struct worker *worker;
-};
-
 // private functions for this class that must be declared here to be called below
 static void * worker_function(void *pool_and_worker_arg);
 static void worker_free(struct worker *worker);
-
-/**
- * Each thread has this local variable. Even though it is declared like a 
- * global variable it is NOT. 
- * NOTE: remember that there is already 1 thread running the main code besides
- *       the worker threads you create in thread_pool_new().
- */
-static __thread bool is_worker; 
-
-typedef enum FutureStatus_ {
-    NOT_STARTED,
-    COMPLETED
-} FutureStatus;
 
 /**
  * Represents a task that needs to be done. Contains fields need to execute
@@ -47,30 +23,17 @@ typedef enum FutureStatus_ {
  * threads local deque and store it's result.
  */
 struct future {
-    pthread_mutex_t f_lock;
     void *param_for_task_fp; 
     fork_join_task_t task_fp; // pointer to the function to be executed by worker
 
     void *result;
     sem_t result_sem; // for if result is finished computing
 
-    FutureStatus status; // NOT_STARTED or COMPLETED
-
-    struct thread_pool *p_pool; // must be passed as an parameter in future_get()
-                                // to be able to execute future->task_fp 
-    bool in_gs_queue;
-    struct worker *worker; // the worker's deque this future is in
-
     struct list_elem gs_queue_elem; // for adding to gs_queue
-    struct list_elem deque_elem; // for adding to local deque of each worker
 };
 
 struct worker {
     pthread_t *thread_id;
-
-    struct list/*<future>*/ local_deque;
-    pthread_mutex_t local_deque_lock;
-
     struct list_elem elem;
 };
 
@@ -80,10 +43,11 @@ struct thread_pool {
    
     pthread_mutex_t shutdown_requested_lock;
     bool shutdown_requested; 
-    sem_t number_of_futures_to_execute;
 
     unsigned int number_of_workers;
-    struct list/*<future>*/ workers_list;
+    struct list/*<worker>*/ workers_list;
+
+    pthread_cond_t condition; // TODO:?
 };
 
 /**
@@ -91,16 +55,16 @@ struct thread_pool {
  */
 struct thread_pool * thread_pool_new(int nthreads) 
 {
-	is_worker = false; // worker_function() sets it to true
+	//is_worker = false; // worker_function() sets it to true
 
     struct thread_pool* pool = (struct thread_pool*) malloc(sizeof(struct thread_pool));
-    assert(pool != NULL);
+
     pthread_mutex_init(&pool->gs_queue_lock, NULL);
     list_init(&pool->gs_queue);    
     
     pthread_mutex_init(&pool->shutdown_requested_lock, NULL);
     pool->shutdown_requested = false;
-    sem_init(&pool->number_of_futures_to_execute, 0, 0);
+
     pool->number_of_workers = nthreads;
 
     // Initialize workers list
@@ -109,27 +73,18 @@ struct thread_pool * thread_pool_new(int nthreads)
     for(i = 0; i < nthreads; i++) {
         struct worker *worker = (struct worker*) malloc(sizeof(struct worker));
         worker->thread_id = (pthread_t *) malloc(sizeof(pthread_t));
-        list_init(&worker->local_deque); 
-        pthread_mutex_init(&worker->local_deque_lock, NULL);
+        
         list_push_back(&pool->workers_list, &worker->elem);
     }
 
-    // to be passed as a parameter to worker_function()
-    struct thread_pool_and_current_worker *worker_fn_args = (struct thread_pool_and_current_worker *) 
-                malloc(sizeof(struct thread_pool_and_current_worker));
-    pthread_mutex_init(&worker_fn_args->lock, NULL);
-    pthread_mutex_lock(&worker_fn_args->lock);
-    worker_fn_args->pool = pool; 
+    pthread_cond_init(&pool->condition, NULL);
 
     struct list_elem *e;
     for (e = list_begin(&pool->workers_list); e != list_end(&pool->workers_list); e = list_next(e)) {
         struct worker *current_worker = list_entry(e, struct worker, elem);
 
-    	worker_fn_args->worker = current_worker;  
-
-        pthread_create(current_worker->thread_id, NULL, worker_function, worker_fn_args);
+        pthread_create(current_worker->thread_id, NULL, worker_function, pool);
     }
-    pthread_mutex_unlock(&worker_fn_args->lock);
 	return pool;
 }
 
